@@ -554,8 +554,6 @@ void set_channel_bwmode(_adapter *padapter, unsigned char channel, unsigned char
 			rtw_hal_ch_sw_iqk_info_backup(padapter);
 #endif
 
-		rtw_odm_adaptivity_update(adapter_to_dvobj(padapter));
-
 #ifdef CONFIG_DFS_MASTER
 		if (new_overlap_radar_detect_ch)
 			rtw_odm_radar_detect_enable(padapter);
@@ -4774,12 +4772,10 @@ void rtw_dump_priv_pattern(_adapter *adapter, u8 idx)
 
 void rtw_wow_pattern_sw_dump(_adapter *adapter)
 {
-	int i = 0, total = 0;
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	total = pwrpriv->wowlan_pattern_idx;
+	int i;
 
 	RTW_INFO("********[RTK priv-patterns]*********\n");
-	for (i = 0 ; i < total; i++)
+	for (i = 0 ; i < MAX_WKFM_CAM_NUM; i++)
 		rtw_dump_priv_pattern(adapter, i);
 }
 

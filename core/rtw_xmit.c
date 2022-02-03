@@ -101,9 +101,6 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, _adapter *padapter)
 	/* _rtw_init_queue(&pxmitpriv->apsd_queue); */
 
 	_rtw_init_queue(&pxmitpriv->free_xmit_queue);
-#ifdef CONFIG_LAYER2_ROAMING
-	_rtw_init_queue(&pxmitpriv->rpkt_queue);
-#endif
 
 	/*
 	Please allocate memory with the sz = (struct xmit_frame) * NR_XMITFRAME,
@@ -426,9 +423,7 @@ void _rtw_free_xmit_priv(struct xmit_priv *pxmitpriv)
 
 	/* free xmit extension buff */
 	_rtw_spinlock_free(&pxmitpriv->free_xmit_extbuf_queue.lock);
-#ifdef CONFIG_LAYER2_ROAMING
-	_rtw_spinlock_free(&pxmitpriv->rpkt_queue.lock);
-#endif
+
 	pxmitbuf = (struct xmit_buf *)pxmitpriv->pxmit_extbuf;
 	for (i = 0; i < NR_XMIT_EXTBUFF; i++) {
 		rtw_os_xmit_resource_free(padapter, pxmitbuf, (MAX_XMIT_EXTBUF_SZ + XMITBUF_ALIGN_SZ), _TRUE);
@@ -5148,22 +5143,13 @@ s32 rtw_xmit(_adapter *padapter, _pkt **ppkt, u16 os_qid)
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct xmit_frame *pxmitframe = NULL;
 	s32 res;
-#ifdef CONFIG_LAYER2_ROAMING
-	struct  mlme_priv       *pmlmepriv = &(padapter->mlmepriv);
-	struct sk_buff *skb = (struct sk_buff *)(*ppkt);
-	_irqL irqL;
-#endif
 
 	DBG_COUNTER(padapter->tx_logs.core_tx);
 
 	if (IS_CH_WAITING(adapter_to_rfctl(padapter)))
 		return -1;
 
-	if ((rtw_linked_check(padapter) == _FALSE)
-#ifdef CONFIG_LAYER2_ROAMING
-		&&(!padapter->mlmepriv.roam_network)
-#endif
-	   )
+	if (rtw_linked_check(padapter) == _FALSE)
 		return -1;
 
 	if (start == 0)
@@ -5207,16 +5193,6 @@ s32 rtw_xmit(_adapter *padapter, _pkt **ppkt, u16 os_qid)
 		}
 	}
 #endif /* CONFIG_BR_EXT */
-#ifdef CONFIG_LAYER2_ROAMING
-	if ((pmlmepriv->roam_network) && (skb->protocol != htons(0x888e))) {	/* eapol never enqueue.*/
-		pxmitframe->pkt = *ppkt;
-		rtw_list_delete(&pxmitframe->list);
-		_enter_critical_bh(&pxmitpriv->rpkt_queue.lock, &irqL);
-		rtw_list_insert_tail(&(pxmitframe->list), get_list_head(&(pxmitpriv->rpkt_queue)));
-		_exit_critical_bh(&pxmitpriv->rpkt_queue.lock, &irqL);
-		return 1;
-	}
-#endif
 
 #if defined(CONFIG_AP_MODE) || defined(CONFIG_RTW_MESH)
 	if (MLME_STATE(padapter) & (WIFI_AP_STATE | WIFI_MESH_STATE)) {
@@ -6669,20 +6645,3 @@ void rtw_ack_tx_done(struct xmit_priv *pxmitpriv, int status)
 		RTW_INFO("%s ack_tx not set\n", __func__);
 }
 #endif /* CONFIG_XMIT_ACK */
-
-void rtw_hci_flush(_adapter *padapter)
-{
-	u8 q;
-
-	if (padapter->hal_func.hci_flush) {
-		for (q = 0; q < HW_QUEUE_ENTRY; q++) {
-			if ((q == BCN_QUEUE_INX) || (q == TXCMD_QUEUE_INX))
-				continue;
-
-			padapter->hal_func.hci_flush(padapter, q);
-		}
-	}
-	else
-		RTW_WARN("hal ops: hci_flush is NULL\n");
-}
-

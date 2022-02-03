@@ -397,32 +397,16 @@ u32 rtw_free_uc_swdec_pending_queue(_adapter *adapter)
 }
 
 
-#ifndef CONFIG_RECVBUF_QUEUE_LOCK_BH
-#ifdef CONFIG_SDIO_HCI
-#define CONFIG_RECVBUF_QUEUE_LOCK_BH 1
-#else
-#define CONFIG_RECVBUF_QUEUE_LOCK_BH 0
-#endif
-#endif /* CONFIG_RECVBUF_QUEUE_LOCK_BH */
-
 sint rtw_enqueue_recvbuf_to_head(struct recv_buf *precvbuf, _queue *queue)
 {
 	_irqL irqL;
 
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
 	_enter_critical_bh(&queue->lock, &irqL);
-#else
-	_enter_critical_ex(&queue->lock, &irqL);
-#endif
 
 	rtw_list_delete(&precvbuf->list);
 	rtw_list_insert_head(&precvbuf->list, get_list_head(queue));
 
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
 	_exit_critical_bh(&queue->lock, &irqL);
-#else
-	_exit_critical_ex(&queue->lock, &irqL);
-#endif
 
 	return _SUCCESS;
 }
@@ -430,23 +414,20 @@ sint rtw_enqueue_recvbuf_to_head(struct recv_buf *precvbuf, _queue *queue)
 sint rtw_enqueue_recvbuf(struct recv_buf *precvbuf, _queue *queue)
 {
 	_irqL irqL;
-
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
+#ifdef CONFIG_SDIO_HCI
 	_enter_critical_bh(&queue->lock, &irqL);
 #else
 	_enter_critical_ex(&queue->lock, &irqL);
-#endif
+#endif/*#ifdef CONFIG_SDIO_HCI*/
 
 	rtw_list_delete(&precvbuf->list);
 
 	rtw_list_insert_tail(&precvbuf->list, get_list_head(queue));
-
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
+#ifdef CONFIG_SDIO_HCI
 	_exit_critical_bh(&queue->lock, &irqL);
 #else
 	_exit_critical_ex(&queue->lock, &irqL);
-#endif
-
+#endif/*#ifdef CONFIG_SDIO_HCI*/
 	return _SUCCESS;
 
 }
@@ -457,11 +438,11 @@ struct recv_buf *rtw_dequeue_recvbuf(_queue *queue)
 	struct recv_buf *precvbuf;
 	_list	*plist, *phead;
 
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
+#ifdef CONFIG_SDIO_HCI
 	_enter_critical_bh(&queue->lock, &irqL);
 #else
 	_enter_critical_ex(&queue->lock, &irqL);
-#endif
+#endif/*#ifdef CONFIG_SDIO_HCI*/
 
 	if (_rtw_queue_empty(queue) == _TRUE)
 		precvbuf = NULL;
@@ -476,11 +457,11 @@ struct recv_buf *rtw_dequeue_recvbuf(_queue *queue)
 
 	}
 
-#if CONFIG_RECVBUF_QUEUE_LOCK_BH
+#ifdef CONFIG_SDIO_HCI
 	_exit_critical_bh(&queue->lock, &irqL);
 #else
 	_exit_critical_ex(&queue->lock, &irqL);
-#endif
+#endif/*#ifdef CONFIG_SDIO_HCI*/
 
 	return precvbuf;
 
@@ -4068,9 +4049,8 @@ int recv_frame_monitor(_adapter *padapter, union recv_frame *rframe)
 
 	/* read skb information from recv frame */
 	pskb = rframe->u.hdr.pkt;
-	pskb->head = rframe->u.hdr.rx_head;
-	pskb->data = rframe->u.hdr.rx_data;
 	pskb->len = rframe->u.hdr.len;
+	pskb->data = rframe->u.hdr.rx_data;
 	skb_set_tail_pointer(pskb, rframe->u.hdr.len);
 
 	if (ndev->type == ARPHRD_IEEE80211_RADIOTAP) {

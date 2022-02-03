@@ -242,9 +242,6 @@ struct registry_priv {
 #ifdef CONFIG_TX_EARLY_MODE
 	u8   early_mode;
 #endif
-#ifdef CONFIG_SW_LED
-	u8   led_ctrl;
-#endif
 #ifdef CONFIG_NARROWBAND_SUPPORTING
 	u8	rtw_nb_config;
 #endif
@@ -1050,8 +1047,8 @@ struct rf_ctl_t {
 	_list reg_exc_list;
 	u8 regd_exc_num;
 	_list txpwr_lmt_list;
-	u8 txpwr_lmt_num;
-	const char *txpwr_lmt_name;
+	u8 txpwr_regd_num;
+	const char *regd_name;
 
 	u8 txpwr_lmt_2g_cck_ofdm_state;
 	#if CONFIG_IEEE80211_BAND_5GHZ
@@ -1063,12 +1060,6 @@ struct rf_ctl_t {
 	u16 tpc_manual_constraint; /* mB */
 
 	bool ch_sel_within_same_band;
-
-	u8 adaptivity_en; /* runtime status, hook to phydm */
-	u8 edcca_mode_2g;
-#if CONFIG_IEEE80211_BAND_5GHZ
-	u8 edcca_mode_5g;
-#endif
 
 #if CONFIG_DFS
 	u8 csa_ch;
@@ -1111,7 +1102,6 @@ struct wow_ctl_t {
 };
 
 #define WOW_CAP_TKIP_OL BIT0
-#define WOW_CAP_HALMAC_ACCESS_PATTERN_IN_TXFIFO BIT1
 
 #define RTW_CAC_STOPPED 0
 #ifdef CONFIG_DFS_MASTER

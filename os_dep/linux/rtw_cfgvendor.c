@@ -1565,6 +1565,7 @@ static int rtw_cfgvendor_logger_get_rx_pkt_fates(struct wiphy *wiphy,
 }
 
 #endif /* CONFIG_RTW_CFGVENDOR_WIFI_LOGGER */
+
 #ifdef CONFIG_RTW_WIFI_HAL
 #ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
 
@@ -1654,24 +1655,6 @@ static int rtw_cfgvendor_set_rand_mac_oui(struct wiphy *wiphy,
 
 
 	return err;
-}
-#endif
-
-#if defined(CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI) || defined(CONFIG_RTW_SCAN_RAND)
-void rtw_hal_set_hw_mac_addr(PADAPTER adapter, u8 *mac_addr)
-{
-	rtw_ps_deny(adapter, PS_DENY_IOCTL);
-	LeaveAllPowerSaveModeDirect(adapter);
-
-#ifdef CONFIG_MI_WITH_MBSSID_CAM
-	rtw_hal_change_macaddr_mbid(adapter, mac_addr);
-#else
-	rtw_hal_set_hwreg(adapter, HW_VAR_MAC_ADDR, mac_addr);
-#endif
-#ifdef CONFIG_RTW_DEBUG
-	rtw_hal_dump_macaddr(RTW_DBGDUMP, adapter);
-#endif
-	rtw_ps_deny_cancel(adapter, PS_DENY_IOCTL);
 }
 #endif
 

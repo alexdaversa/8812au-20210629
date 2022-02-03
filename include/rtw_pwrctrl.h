@@ -52,7 +52,7 @@
 #ifdef CONFIG_WOW_PATTERN_HW_CAM	/* Frame Mask Cam number for pattern match */
 #define MAX_WKFM_CAM_NUM	12
 #else
-#define MAX_WKFM_CAM_NUM	10
+#define MAX_WKFM_CAM_NUM	16
 #endif
 
 #define MAX_WKFM_SIZE	16 /* (16 bytes for WKFM bit mask, 16*8 = 128 bits) */
@@ -512,9 +512,6 @@ struct pwrctrl_priv {
 	u8		wowlan_pattern_idx;
 	u64		wowlan_fw_iv;
 	struct rtl_priv_pattern	patterns[MAX_WKFM_CAM_NUM];
-#ifdef CONFIG_WOW_PATTERN_IN_TXFIFO
-	u8		pattern_rsvd_page_loc;
-#endif
 #ifdef CONFIG_PNO_SUPPORT
 	u8		pno_inited;
 	pno_nlo_info_t	*pnlo_info;

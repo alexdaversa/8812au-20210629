@@ -152,7 +152,7 @@ void phydm_set_l2h_th_ini_win(void *dm_void)
 
 	 /*@ [New Format: JGR3]IGI-idx:45 = RSSI:35 = -65dBm*/
 	if (dm->support_ic_type & ODM_IC_JGR3_SERIES) {
-		if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8723F))
+		if (dm->support_ic_type & ODM_RTL8822C)
 			dm->th_l2h_ini = 45;
 		else if (dm->support_ic_type & ODM_RTL8814B)
 			dm->th_l2h_ini = 49;
@@ -329,7 +329,7 @@ void phydm_set_l2h_th_ini(void *dm_void)
 
 	 /*@ [New Format: JGR3]IGI-idx:45 = RSSI:35 = -65dBm*/
 	if (dm->support_ic_type & ODM_IC_JGR3_SERIES) {
-		if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8723F))
+		if (dm->support_ic_type & ODM_RTL8822C)
 			dm->th_l2h_ini = 45;
 		else if (dm->support_ic_type & ODM_RTL8814B)
 			dm->th_l2h_ini = 49;
@@ -809,15 +809,7 @@ void phydm_adaptivity(void *dm_void)
 	    adapt->switch_th_l2h_ini_in_band)
 		phydm_set_l2h_th_ini_win(dm);
 #endif
-#if (DM_ODM_SUPPORT_TYPE == ODM_CE)
-	if (!adapt->debug_mode) {
-		if (*dm->edcca_mode == PHYDM_EDCCA_ADAPT_MODE &&
-		    dm->carrier_sense_enable)
-			phydm_set_l2h_th_ini_carrier_sense(dm);
-		else if (*dm->edcca_mode == PHYDM_EDCCA_ADAPT_MODE)
-			phydm_set_l2h_th_ini(dm);
-	}
-#endif
+
 	PHYDM_DBG(dm, DBG_ADPTVTY, "%s ====>\n", __func__);
 	PHYDM_DBG(dm, DBG_ADPTVTY, "mode = %s, debug_mode = %d\n",
 		  (*dm->edcca_mode ?

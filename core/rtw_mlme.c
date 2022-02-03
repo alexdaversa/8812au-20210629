@@ -148,8 +148,6 @@ sint	_rtw_init_mlme_priv(_adapter *padapter)
 #define RTW_ROAM_RSSI_DIFF_TH 10
 #define RTW_ROAM_SCAN_INTERVAL (5)    /* 5*(2 second)*/
 #define RTW_ROAM_RSSI_THRESHOLD 70
-#define RTW_ROAM_DICONNECT_DELAY	20
-	_rtw_spinlock_init(&pmlmepriv->clnt_auth_lock);
 	pmlmepriv->roam_flags = CONFIG_ROAMING_FLAG;
 
 	pmlmepriv->roam_scanr_exp_ms = RTW_ROAM_SCAN_RESULT_EXP_MS;
@@ -185,9 +183,6 @@ void rtw_mfree_mlme_priv_lock(struct mlme_priv *pmlmepriv);
 void rtw_mfree_mlme_priv_lock(struct mlme_priv *pmlmepriv)
 {
 	_rtw_spinlock_free(&pmlmepriv->lock);
-#ifdef CONFIG_LAYER2_ROAMING
-	_rtw_spinlock_free(&pmlmepriv->clnt_auth_lock);
-#endif
 	_rtw_spinlock_free(&(pmlmepriv->free_bss_pool.lock));
 	_rtw_spinlock_free(&(pmlmepriv->scanned_queue.lock));
 #ifdef CONFIG_RTW_MULTI_AP
@@ -903,9 +898,7 @@ void update_network(WLAN_BSSID_EX *dst, WLAN_BSSID_EX *src,
 		dst->Reserved[1] = src->Reserved[1];
 		_rtw_memcpy((u8 *)dst, (u8 *)src, get_WLAN_BSSID_EX_sz(src));
 	}
-#ifdef CONFIG_LAYER2_ROAMING
-	dst->tsf = src->tsf;
-#endif
+
 	dst->PhyInfo.SignalStrength = ss_final;
 	dst->PhyInfo.SignalQuality = sq_final;
 	dst->Rssi = rssi_final;
@@ -1095,9 +1088,7 @@ bool rtw_update_scanned_network(_adapter *adapter, WLAN_BSSID_EX *target)
 			pnetwork->acnode_stime = 0;
 			pnetwork->acnode_notify_etime = 0;
 			#endif
-#ifdef	CONFIG_LAYER2_ROAMING
-			pnetwork->network.tsf = target->tsf;
-#endif
+
 			pnetwork->network_type = 0;
 			pnetwork->aid = 0;
 			pnetwork->join_res = 0;
@@ -2314,7 +2305,7 @@ u8 _rtw_sitesurvey_condition_check(const char *caller, _adapter *adapter, bool c
 	}
 
 #ifdef CONFIG_ADAPTIVITY_DENY_SCAN
-	if (adapter_to_rfctl(adapter)->adaptivity_en
+	if (registry_par->adaptivity_en
 	    && rtw_phydm_get_edcca_flag(adapter)
 	    && rtw_is_2g_ch(GET_HAL_DATA(adapter)->current_channel)) {
 		RTW_WARN(FUNC_ADPT_FMT": Adaptivity block scan! (ch=%u)\n",
@@ -2795,12 +2786,10 @@ static struct sta_info *rtw_joinbss_update_stainfo(_adapter *padapter, struct wl
 	struct recv_reorder_ctrl *preorder_ctrl;
 	struct sta_priv *pstapriv = &padapter->stapriv;
 	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
-#if defined(CONFIG_RTS_FULL_BW) || defined(CONFIG_RTW_MULTI_AP)
-	struct	mlme_priv	*pmlmepriv = &(padapter->mlmepriv);
-#endif
 #ifdef CONFIG_RTS_FULL_BW
+	struct	mlme_priv	*pmlmepriv = &(padapter->mlmepriv);
 	struct wlan_network  *cur_network = &(pmlmepriv->cur_network);
-#endif
+#endif/*CONFIG_RTS_FULL_BW*/
 
 	psta = rtw_get_stainfo(pstapriv, pnetwork->network.MacAddress);
 	if (psta == NULL)
@@ -3490,10 +3479,6 @@ void rtw_stadel_event_callback(_adapter *adapter, u8 *pbuf)
 	struct wlan_network *tgt_network = &(pmlmepriv->cur_network);
 
 	RTW_INFO("%s(mac_id=%d)=" MAC_FMT "\n", __func__, pstadel->mac_id, MAC_ARG(pstadel->macaddr));
-#ifdef CONFIG_LAYER2_ROAMING
-	if (pmlmepriv->roam_network)
-		rtw_msleep_os(RTW_ROAM_DICONNECT_DELAY);
-#endif
 	rtw_sta_mstatus_disc_rpt(adapter, pstadel->mac_id);
 
 #ifdef CONFIG_MCC_MODE
@@ -3583,9 +3568,7 @@ void rtw_stadel_event_callback(_adapter *adapter, u8 *pbuf)
 
 		rtw_indicate_disconnect(adapter, *(u16 *)pstadel->rsvd, pstadel->locally_generated);
 
-#ifdef CONFIG_LAYER2_ROAMING
 		_rtw_roaming(adapter, roam_target);
-#endif
 	}
 
 #ifdef CONFIG_AP_MODE
@@ -3876,9 +3859,7 @@ void rtw_drv_scan_by_self(_adapter *padapter, u8 reason)
 		goto exit;
 #endif
 
-	rtw_init_sitesurvey_parm(padapter, &parm);
-	parm.reason = reason;
-	rtw_set_802_11_bssid_list_scan(padapter, &parm);
+	rtw_set_802_11_bssid_list_scan(padapter, NULL);
 exit:
 	return;
 }
@@ -4202,11 +4183,6 @@ static int rtw_check_roaming_candidate(struct mlme_priv *mlme
 	if (rtw_is_desired_network(adapter, competitor) == _FALSE)
 		goto exit;
 
-#ifdef CONFIG_RTW_ROAM_QUICKSCAN
-	if (competitor->network.PhyInfo.SignalStrength > CONFIG_RTW_ROAM_QUICKSCAN_TH)
-		adapter->mlmeextpriv.quickscan_next = _TRUE;
-#endif
-
 #ifdef CONFIG_LAYER2_ROAMING
 	if (mlme->need_to_roam == _FALSE)
 		goto exit;
@@ -4471,6 +4447,7 @@ int rtw_select_and_join_from_scanned_queue(struct mlme_priv *pmlmepriv)
 #ifdef CONFIG_LAYER2_ROAMING
 	if (pmlmepriv->roam_network) {
 		candidate = pmlmepriv->roam_network;
+		pmlmepriv->roam_network = NULL;
 		goto candidate_exist;
 	}
 #endif

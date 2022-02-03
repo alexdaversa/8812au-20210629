@@ -204,8 +204,6 @@ extern const u16	phy_rate_table[84];
 #define PHY_HIST_SIZE		12
 #define PHY_HIST_TH_SIZE	(PHY_HIST_SIZE - 1)
 
-#define	S_TO_US			1000000
-
 /*@============================================================*/
 /*structure and define*/
 /*@============================================================*/
@@ -570,8 +568,6 @@ enum phydm_info_query {
 	PHYDM_INFO_NHM_NOISE_PWR,
 	PHYDM_INFO_NHM_PWR,
 	PHYDM_INFO_NHM_ENV_RATIO,
-	PHYDM_INFO_TXEN_CCK,
-	PHYDM_INFO_TXEN_OFDM,
 
 };
 
@@ -868,15 +864,11 @@ struct dm_struct {
 	boolean			en_dis_dpd;
 	u16			dis_dpd_rate;
 	u8			en_auto_bw_th;
-	boolean			is_pause_dig;
-	#if (RTL8822C_SUPPORT || RTL8814B_SUPPORT || RTL8197G_SUPPORT)
+	#if (RTL8822C_SUPPORT || RTL8814B_SUPPORT || RTL8197G_SUPPORT || RTL8723F_SUPPORT)
 	u8			txagc_buff[RF_PATH_MEM_SIZE][PHY_NUM_RATE_IDX];
 	u32			bp_0x9b0;
-	#elif (RTL8723F_SUPPORT)
-	u8			txagc_buff[2][PHY_NUM_RATE_IDX];
-	u32			bp_0x9b0;
 	#endif
-	#if (RTL8822C_SUPPORT || RTL8723F_SUPPORT)
+	#if (RTL8822C_SUPPORT)
 	u8			ofdm_rxagc_l_bnd[16];
 	boolean			l_bnd_detect[16];
 	u16			agc_rf_gain_ori[16][64];/*[table][mp_gain_idx]*/

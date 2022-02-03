@@ -584,7 +584,6 @@ struct mlme_priv {
 	u8 roam_rssi_threshold;
 	systime last_roaming;
 	bool need_to_roam;
-        _lock   clnt_auth_lock;        /* protect the join operation in rx_tasklet & cmd_thread */
 #endif
 
 	u32 defs_lmt_sta;

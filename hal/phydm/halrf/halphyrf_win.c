@@ -234,11 +234,8 @@ odm_txpowertracking_callback_thermal_meter(
 	<Kordan> rf_calibrate_info.rega24 will be initialized when ODM HW configuring, but MP configures with para files. */
 #if (DM_ODM_SUPPORT_TYPE & ODM_WIN)
 #if (MP_DRIVER == 1)
-#ifndef RTL8723F_SUPPORT
 	cali_info->rega24 = 0x090e1317;
 #endif
-#endif
-
 #elif (DM_ODM_SUPPORT_TYPE & ODM_CE)
 	if (*(dm->mp_mode) == true)
 		cali_info->rega24 = 0x090e1317;
@@ -760,7 +757,7 @@ odm_txpowertracking_callback_thermal_meter(
 	cali_info->tx_powercount = 0;
 }
 
-#if (RTL8822C_SUPPORT == 1 || RTL8814B_SUPPORT == 1  || RTL8723F_SUPPORT == 1)
+#if (RTL8822C_SUPPORT == 1 || RTL8814B_SUPPORT == 1)
 void
 odm_txpowertracking_new_callback_thermal_meter(void *dm_void)
 {
@@ -884,9 +881,7 @@ odm_txpowertracking_new_callback_thermal_meter(void *dm_void)
 			cali_info->thermal_value_lck = thermal_value[RF_PATH_A];
 
 			/*Use RTLCK, so close power tracking driver LCK*/
-			if ((!(dm->support_ic_type & ODM_RTL8814A)) &&
-			    (!(dm->support_ic_type & ODM_RTL8822B)) &&
-			    (!(dm->support_ic_type & ODM_RTL8723F))) {
+			if ((!(dm->support_ic_type & ODM_RTL8814A)) && (!(dm->support_ic_type & ODM_RTL8822B))) {
 				if (c.phy_lc_calibrate)
 					(*c.phy_lc_calibrate)(dm);
 			} else

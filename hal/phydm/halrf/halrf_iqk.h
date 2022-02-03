@@ -43,8 +43,7 @@
 	RTL8814B_SUPPORT)
 #define NUM 4
 #elif (RTL8822B_SUPPORT == 1 || RTL8822C_SUPPORT == 1 ||\
-	RTL8812F_SUPPORT == 1 || RTL8197G_SUPPORT == 1 ||\
-	RTL8723F_SUPPORT == 1)
+	RTL8812F_SUPPORT == 1 ||	RTL8197G_SUPPORT == 1)
 #define NUM 2
 #else
 #define NUM 1
@@ -146,11 +145,6 @@ struct dm_iqk_info {
 	u32 txxy[2][2];
 	u32 rxxy[2][2];
 #endif
-#if (RTL8723F_SUPPORT == 1)
-	u32 txxy[2][2];
-	u32 rxxy[2][2][2];
-#endif
-
 #endif
 };
 

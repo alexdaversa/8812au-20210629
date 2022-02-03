@@ -627,16 +627,18 @@
 		#define CONFIG_WOW_PATTERN_IN_TXFIFO
 	#endif
 
+#if 0 /* todo: 8723F , need to check in the future */
 	#ifdef CONFIG_WOWLAN
 		#define CONFIG_GTK_OL
 		/*#define CONFIG_ARP_KEEP_ALIVE*/
 
 		#ifdef CONFIG_GPIO_WAKEUP
 			#ifndef WAKEUP_GPIO_IDX
-				#define WAKEUP_GPIO_IDX	12	/* WIFI Chip Side */
+				#define WAKEUP_GPIO_IDX	6	/* WIFI Chip Side */
 			#endif /* !WAKEUP_GPIO_IDX */
 		#endif /* CONFIG_GPIO_WAKEUP */
 	#endif /* CONFIG_WOWLAN */
+#endif
 
 	#ifdef CONFIG_CONCURRENT_MODE
 		#define CONFIG_AP_PORT_SWAP
@@ -705,9 +707,5 @@
 	#ifndef CONFIG_TXPWR_PG_WITH_TSSI_OFFSET
 	#define CONFIG_TXPWR_PG_WITH_TSSI_OFFSET
 	#endif
-
-	#define CONFIG_BT_EFUSE_MASK
-
-	#define CONFIG_WRITE_BCN_LEN_TO_FW
 #endif /* CONFIG_RTL8723F */
 #endif /*__HAL_IC_CFG_H__*/

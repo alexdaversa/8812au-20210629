@@ -72,11 +72,6 @@
 
 #endif
 
-#ifdef CONFIG_LAYER2_ROAMING
-/*#define CONFIG_RTW_ROAM_QUICKSCAN	*/	/* active_roaming is required. i.e CONFIG_ROAMING_FLAG[bit2] MUST be enabled */
-/*#define CONFIG_RTW_ROAM_QUICKSCAN_TH           60*/
-#endif
-
 /* Default enable single wiphy if driver ver >= 5.9 */
 #define RTW_SINGLE_WIPHY
 
@@ -111,6 +106,20 @@
 		#endif
 		#else
  		#error "Linux kernel version is too old\n"
+		#endif
+	#endif
+
+	#if (CONFIG_RTW_ANDROID >= 11)
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,4,0))
+			#ifndef CONFIG_RTW_ANDROID_GKI
+			#define CONFIG_RTW_ANDROID_GKI
+			#endif
+		#endif
+
+		#ifdef CONFIG_RTW_ANDROID_GKI
+			#ifdef CONFIG_ADAPTOR_INFO_CACHING_FILE
+			#undef CONFIG_ADAPTOR_INFO_CACHING_FILE
+			#endif
 		#endif
 	#endif
 
@@ -161,6 +170,13 @@
 
 	/* Android expect dbm as the rx signal strength unit */
 	#define CONFIG_SIGNAL_DISPLAY_DBM
+
+#else // for Linux
+
+	#ifndef CONFIG_RTW_SCAN_RAND
+	#define CONFIG_RTW_SCAN_RAND
+	#endif
+
 #endif // CONFIG_RTW_ANDROID
 
 /*
@@ -193,7 +209,7 @@
 #endif
 
 #ifdef CONFIG_WIFI_MONITOR
-	#define CONFIG_MONITOR_MODE_XMIT
+	/*	#define CONFIG_MONITOR_MODE_XMIT	*/
 #endif
 
 #ifdef CONFIG_CUSTOMER_ALIBABA_GENERAL
@@ -307,6 +323,7 @@
 
 #define RTW_SCAN_SPARSE_MIRACAST 1
 #define RTW_SCAN_SPARSE_BG 0
+#define RTW_SCAN_SPARSE_ROAMING_ACTIVE 1
 
 #ifndef CONFIG_TX_AC_LIFETIME
 #define CONFIG_TX_AC_LIFETIME 1

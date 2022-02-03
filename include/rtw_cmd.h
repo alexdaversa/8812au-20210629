@@ -364,7 +364,6 @@ struct sitesurvey_parm {
 	u8 bw;		/* 0: use default */
 
 	bool acs; /* aim to trigger channel selection when scan done */
-	u8 reason;
 };
 
 /*
@@ -563,11 +562,6 @@ struct RunInThread_param {
 	void *context;
 };
 
-#ifdef CONFIG_WRITE_BCN_LEN_TO_FW
-struct write_bcnlen_param {
-	u16 bcn_len;
-};
-#endif
 
 #define GEN_CMD_CODE(cmd)	cmd ## _CMD_
 
@@ -733,11 +727,6 @@ u8 rtw_req_per_cmd(_adapter * adapter);
 u8 rtw_tbtx_chk_cmd(_adapter *adapter);
 u8 rtw_tbtx_token_dispatch_cmd(_adapter *adapter);
 #endif
-
-#ifdef CONFIG_WRITE_BCN_LEN_TO_FW
-u8 rtw_write_bcnlen_to_fw_cmd(_adapter *padapter, u16 bcn_len);
-#endif
-
 #ifdef CONFIG_CTRL_TXSS_BY_TP
 struct txss_cmd_parm {
 	struct sta_info *sta;
@@ -789,7 +778,6 @@ enum rtw_cmd_id {
 	CMD_SET_MESH_PLINK_STATE, /* 21 */
 	CMD_DO_IQK, /* 22 */
 	CMD_GET_CHANPLAN, /*23*/
-	CMD_WRITE_BCN_LEN, /*24 */
 	CMD_ID_MAX
 };
 

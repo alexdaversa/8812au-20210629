@@ -3187,7 +3187,7 @@ static int rtw_wx_get_nick(struct net_device *dev,
 	if (extra) {
 		wrqu->data.length = 14;
 		wrqu->data.flags = 1;
-		_rtw_memcpy(extra, "WIFI@RTL8812AU", 14);
+		_rtw_memcpy(extra, "<WIFI@REALTEK>", 14);
 	}
 
 	/* rtw_signal_process(pid, SIGUSR1); */ /* for test */
@@ -9888,11 +9888,6 @@ static int rtw_mp_efuse_set(struct net_device *dev,
 		/*step read efuse/eeprom data and get mac_addr*/
 		if (padapter->hal_func.read_adapter_info(padapter)) {
 			_rtw_memset(extra, '\0', strlen(extra));
-			#ifdef CONFIG_TXPWR_PG_WITH_PWR_IDX
-			if (pHalData->txpwr_pg_mode == TXPWR_PG_WITH_PWR_IDX)
-				hal_load_txpwr_info(padapter);
-			#endif
-			phy_load_tx_power_ext_info(padapter, 1);
 			sprintf(extra, "eFuse Update OK\n");
 			RTW_INFO("eFuse Update OK\n");
 		} else {
@@ -10234,8 +10229,12 @@ static int rtw_priv_mp_get(struct net_device *dev,
 		status = rtw_efuse_file_map(dev, info, wdata, extra);
 		break;
 	case EFUSE_FILE_STORE:
+#if !defined(CONFIG_RTW_ANDROID_GKI)
 		RTW_INFO("mp_get EFUSE_FILE_STORE\n");
 		status = rtw_efuse_file_map_store(dev, info, wdata, extra);
+#else
+		RTW_ERR("Android GKI doesn't support: mp_get EFUSE_FILE_STORE\n");
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI) */
 		break;
 	case MP_TX:
 		RTW_INFO("mp_get MP_TX\n");

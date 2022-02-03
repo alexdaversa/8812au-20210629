@@ -52,10 +52,9 @@ void rtl8812_sreset_xmit_status_check(_adapter *padapter)
 
 					/* padapter->Wifi_Error_Status = WIFI_TX_HANG; */
 					RTW_INFO("%s tx hang %s\n", __FUNCTION__,
-						!adapter_to_rfctl(padapter)->adaptivity_en ? "" :
-							rtw_edcca_mode_str(rtw_get_edcca_mode(adapter_to_dvobj(padapter), pHalData->current_band_type)));
+						(rtw_odm_adaptivity_needed(padapter)) ? "ODM_BB_ADAPTIVITY" : "");
 
-					if (!adapter_to_rfctl(padapter)->adaptivity_en)
+					if (!rtw_odm_adaptivity_needed(padapter))
 						rtw_hal_sreset_reset(padapter);
 				}
 			}

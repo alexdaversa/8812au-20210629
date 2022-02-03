@@ -330,7 +330,7 @@ void phydm_cfo_tracking_reset(void *dm_void)
 	PHYDM_DBG(dm, DBG_CFO_TRK, "%s ======>\n", __func__);
 
 	if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8814B | ODM_RTL8195B |
-	    ODM_RTL8812F | ODM_RTL8710C | ODM_RTL8721D | ODM_RTL8723F))
+	    ODM_RTL8812F|ODM_RTL8723F))
 		cfo_track->def_x_cap = cfo_track->crystal_cap_default & 0x7f;
 	else
 		cfo_track->def_x_cap = cfo_track->crystal_cap_default & 0x3f;
@@ -371,7 +371,7 @@ void phydm_cfo_tracking_init(void *dm_void)
 
 	PHYDM_DBG(dm, DBG_CFO_TRK, "[%s]=========>\n", __func__);
 	if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8814B | ODM_RTL8195B |
-	    ODM_RTL8812F | ODM_RTL8710C | ODM_RTL8721D | ODM_RTL8723F))
+	    ODM_RTL8812F|ODM_RTL8723F))
 		cfo_track->crystal_cap = cfo_track->crystal_cap_default & 0x7f;
 	else
 		cfo_track->crystal_cap = cfo_track->crystal_cap_default & 0x3f;
@@ -486,7 +486,7 @@ void phydm_cfo_tracking(void *dm_void)
 				crystal_cap -= 1;
 
 			if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8814B |
-			    ODM_RTL8195B | ODM_RTL8812F | ODM_RTL8710C | ODM_RTL8721D | ODM_RTL8723F)) {
+			    ODM_RTL8195B | ODM_RTL8812F|ODM_RTL8723F)) {
 				if (crystal_cap > 0x7F)
 					crystal_cap = 0x7F;
 			} else {

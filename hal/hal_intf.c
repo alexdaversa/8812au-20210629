@@ -87,12 +87,13 @@ static void rtw_init_wireless_mode(_adapter *padapter)
 	struct hal_spec_t *hal_spec = GET_HAL_SPEC(padapter);
 	if(hal_spec->proto_cap & PROTO_CAP_11B)
 		proto_wireless_mode |= WIRELESS_11B;
-
+	
 	if(hal_spec->proto_cap & PROTO_CAP_11G)
 		proto_wireless_mode |= WIRELESS_11G;
-
+#ifdef CONFIG_80211AC_VHT
 	if(hal_spec->band_cap & BAND_CAP_5G)
 		proto_wireless_mode |= WIRELESS_11A;
+#endif
 
 #ifdef CONFIG_80211N_HT
 	if(hal_spec->proto_cap & PROTO_CAP_11N) {

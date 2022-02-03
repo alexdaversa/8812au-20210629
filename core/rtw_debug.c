@@ -42,7 +42,7 @@ const char *rtw_log_level_str[] = {
 void dump_drv_version(void *sel)
 {
 	RTW_PRINT_SEL(sel, "%s %s\n", DRV_NAME, DRIVERVERSION);
-//	RTW_PRINT_SEL(sel, "build time: %s %s\n", __DATE__, __TIME__);
+	RTW_PRINT_SEL(sel, "build time: %s %s\n", __DATE__, __TIME__);
 }
 
 #ifdef CONFIG_PROC_DEBUG
@@ -139,7 +139,9 @@ extern uint rtw_recvbuf_nr;
 #endif
 
 	RTW_PRINT_SEL(sel, "CONFIG_RTW_ADAPTIVITY_EN = %d\n", CONFIG_RTW_ADAPTIVITY_EN);
-	RTW_PRINT_SEL(sel, "CONFIG_RTW_ADAPTIVITY_MODE = %d\n", CONFIG_RTW_ADAPTIVITY_MODE);
+#if (CONFIG_RTW_ADAPTIVITY_EN)
+	RTW_PRINT_SEL(sel, "ADAPTIVITY_MODE = %s\n", (CONFIG_RTW_ADAPTIVITY_MODE) ? "carrier_sense" : "normal");
+#endif
 
 #ifdef CONFIG_WOWLAN
 	RTW_PRINT_SEL(sel, "CONFIG_WOWLAN - ");
@@ -334,8 +336,7 @@ void mac_reg_dump(void *sel, _adapter *adapter)
 	}
 #endif /* CONFIG_RTL8814A */
 
-#if defined(CONFIG_RTL8822B) || defined(CONFIG_RTL8821C) || defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B) \
-	|| defined(CONFIG_RTL8723F)
+#if defined(CONFIG_RTL8822B) || defined(CONFIG_RTL8821C) || defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B)
 	for (i = 0x1000; i < 0x1800; i += 4) {
 		if (j % 4 == 1)
 			RTW_PRINT_SEL(sel, "0x%04x", i);
@@ -395,8 +396,7 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 			_RTW_PRINT_SEL(sel, "\n");
 	}
 
-#if defined(CONFIG_RTL8822B) || defined(CONFIG_RTL8821C) || defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B) \
-	|| defined(CONFIG_RTL8723F)
+#if defined(CONFIG_RTL8822B) || defined(CONFIG_RTL8821C) || defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B)
 	for (i = 0x1800; i < 0x2000; i += 4) {
 		if (j % 4 == 1)
 			RTW_PRINT_SEL(sel, "0x%04x", i);
@@ -406,7 +406,7 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 	}
 #endif /* CONFIG_RTL8822B */
 
-#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B) || defined(CONFIG_RTL8723F)
+#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8814B)
 	for (i = 0x2c00; i < 0x2c60; i += 4) {
 		if (j % 4 == 1)
 			RTW_PRINT_SEL(sel, "0x%04x", i);
@@ -421,7 +421,7 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 		_RTW_PRINT_SEL(sel, " 0x%08x ", rtw_read32(adapter, i));
 		if ((j++) % 4 == 0)
 			_RTW_PRINT_SEL(sel, "\n");
-	}
+	}	
 
 	for (i = 0x4000; i < 0x4060; i += 4) {
 		if (j % 4 == 1)
@@ -429,7 +429,7 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 		_RTW_PRINT_SEL(sel, " 0x%08x ", rtw_read32(adapter, i));
 		if ((j++) % 4 == 0)
 			_RTW_PRINT_SEL(sel, "\n");
-	}
+	}	
 
 	for (i = 0x4100; i < 0x4200; i += 4) {
 		if (j % 4 == 1)
@@ -437,9 +437,9 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 		_RTW_PRINT_SEL(sel, " 0x%08x ", rtw_read32(adapter, i));
 		if ((j++) % 4 == 0)
 			_RTW_PRINT_SEL(sel, "\n");
-	}
+	}	
 
-#endif /* CONFIG_RTL8822C || CONFIG_RTL8814B || CONFIG_8723F */
+#endif /* CONFIG_RTL8822C || CONFIG_RTL8814B */
 
 #if defined(CONFIG_RTL8814B)
 	for (i = 0x5200; i < 0x5400; i += 4) {
@@ -450,17 +450,6 @@ void bb_reg_dump(void *sel, _adapter *adapter)
 			_RTW_PRINT_SEL(sel, "\n");
 	}
 #endif /* CONFIG_RTL8814B */
-
-#if defined(CONFIG_RTL8723F)
-	/* TSSI related */
-	for (i = 0x4300; i < 0x43C0; i += 4) {
-		if (j % 4 == 1)
-			RTW_PRINT_SEL(sel, "0x%04x", i);
-		_RTW_PRINT_SEL(sel, " 0x%08x ", rtw_read32(adapter, i));
-		if ((j++) % 4 == 0)
-			_RTW_PRINT_SEL(sel, "\n");
-	}
-#endif /* CONFIG_RTL8723F */
 }
 
 void bb_reg_dump_ex(void *sel, _adapter *adapter)
@@ -2257,7 +2246,6 @@ int proc_get_survey_info(struct seq_file *m, void *v)
 #else
 	const char *ssid_title_str = "ssid";
 #endif
-	u8 rsni = 255;
 
 	_enter_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
 	phead = get_list_head(queue);
@@ -2271,8 +2259,7 @@ int proc_get_survey_info(struct seq_file *m, void *v)
 	rtw_rson_show_survey_info(m, plist, phead);
 #else
 
-	RTW_PRINT_SEL(m, "%5s  %-17s  %3s  %-3s  %-4s  %-4s  %4s  %5s  %32s  %32s \n",
-	"index", "bssid", "ch", "RSSI", "SdBm", "Noise", "rsni", "age", "flag", ssid_title_str);
+	RTW_PRINT_SEL(m, "%5s  %-17s  %3s  %-3s  %-4s  %-4s  %5s  %32s  %32s\n", "index", "bssid", "ch", "RSSI", "SdBm", "Noise", "age", "flag", ssid_title_str);
 	while (1) {
 		if (rtw_end_of_queue_search(phead, plist) == _TRUE)
 			break;
@@ -2292,9 +2279,6 @@ int proc_get_survey_info(struct seq_file *m, void *v)
 		if (IS_NM_ENABLE(padapter))
 			notify_noise = rtw_noise_query_by_chan_num(padapter, pnetwork->network.Configuration.DSConfig);
 #endif
-#ifdef CONFIG_RTW_ACS
-		rsni = rtw_acs_get_rsni(padapter, (int)(pnetwork->network.Rssi), pnetwork->network.Configuration.DSConfig);
-#endif
 
 		ie_wpa = rtw_get_wpa_ie(&pnetwork->network.IEs[12], &ielen, pnetwork->network.IELength - 12);
 		ie_wpa2 = rtw_get_wpa2_ie(&pnetwork->network.IEs[12], &ielen, pnetwork->network.IELength - 12);
@@ -2313,14 +2297,13 @@ int proc_get_survey_info(struct seq_file *m, void *v)
 				(pnetwork->network.InfrastructureMode == Ndis802_11_mesh) ? "[MESH]" : "",
 			(ie_cap & BIT(0)) ? "[ESS]" : "",
 			(ie_p2p) ? "[P2P]" : "");
-		RTW_PRINT_SEL(m, "%5d  "MAC_FMT"  %3d  %4d  %4d  %4d  %4d   %5d  %32s  %32s\n",
+		RTW_PRINT_SEL(m, "%5d  "MAC_FMT"  %3d  %3d  %4d  %4d    %5d  %32s  %32s\n",
 			++index,
 			MAC_ARG(pnetwork->network.MacAddress),
 			pnetwork->network.Configuration.DSConfig,
 			(int)pnetwork->network.Rssi,
 			notify_signal,
 			notify_noise,
-			rsni,
 			rtw_get_passing_time_ms(pnetwork->last_scanned),
 			flag_str,
 			pnetwork->network.InfrastructureMode == Ndis802_11_mesh ? pnetwork->network.mesh_id.Ssid : pnetwork->network.Ssid.Ssid

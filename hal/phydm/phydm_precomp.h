@@ -636,7 +636,6 @@ rtw_phydm_cfg_phy_para(
 	#include "halrf/rtl8723f/version_rtl8723f_rf.h"
 	#include "halrf/rtl8723f/halrf_iqk_8723f.h"
 	#include "halrf/rtl8723f/halrf_dpk_8723f.h"
-	#include "halrf/rtl8723f/halrf_txgapk_8723f.h"
 	#include "halrf/rtl8723f/halrf_tssi_8723f.h"
 	#include "halrf/rtl8723f/halrf_rfk_init_8723f.h"
 	#include "rtl8723f/phydm_hal_api8723f.h"

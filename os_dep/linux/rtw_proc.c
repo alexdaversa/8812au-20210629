@@ -37,8 +37,6 @@ inline struct proc_dir_entry *get_rtw_drv_proc(void)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 #define PDE_DATA(inode) PDE((inode))->data
 #define proc_get_parent_data(inode) PDE((inode))->parent->data
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0))
-#define PDE_DATA(inode) pde_data(inode)
 #endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 24))
@@ -163,52 +161,15 @@ static int proc_get_mstat(struct seq_file *m, void *v)
 }
 #endif /* DBG_MEM_ALLOC */
 
-static bool regd_info;
 static int proc_get_country_chplan_map(struct seq_file *m, void *v)
 {
-	dump_country_chplan_map(m, regd_info);
-	return 0;
-}
-
-static ssize_t proc_set_country_chplan_map(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
-{
-	char tmp[32];
-	int regd_info_val;
-
-	if (count < 1)
-		return -EINVAL;
-
-	if (count > sizeof(tmp)) {
-		rtw_warn_on(1);
-		return -EFAULT;
-	}
-
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%d", &regd_info_val);
-
-		if (num >= 1)
-			regd_info = regd_info_val ? 1 : 0;
-	} else
-		return -EFAULT;
-
-	return count;
-}
-
-static int proc_get_country_list(struct seq_file *m, void *v)
-{
-	dump_country_list(m);
+	dump_country_chplan_map(m);
 	return 0;
 }
 
 static int proc_get_chplan_id_list(struct seq_file *m, void *v)
 {
 	dump_chplan_id_list(m);
-	return 0;
-}
-
-static int proc_get_chplan_country_list(struct seq_file *m, void *v)
-{
-	dump_chplan_country_list(m);
 	return 0;
 }
 
@@ -266,10 +227,8 @@ const struct rtw_proc_hdl drv_proc_hdls[] = {
 #ifdef DBG_MEM_ALLOC
 	RTW_PROC_HDL_SSEQ("mstat", proc_get_mstat, NULL),
 #endif /* DBG_MEM_ALLOC */
-	RTW_PROC_HDL_SSEQ("country_chplan_map", proc_get_country_chplan_map, proc_set_country_chplan_map),
-	RTW_PROC_HDL_SSEQ("country_list", proc_get_country_list, NULL),
+	RTW_PROC_HDL_SSEQ("country_chplan_map", proc_get_country_chplan_map, NULL),
 	RTW_PROC_HDL_SSEQ("chplan_id_list", proc_get_chplan_id_list, NULL),
-	RTW_PROC_HDL_SSEQ("chplan_country_list", proc_get_chplan_country_list, NULL),
 #ifdef CONFIG_RTW_DEBUG
 	RTW_PROC_HDL_SSEQ("chplan_test", proc_get_chplan_test, NULL),
 #endif
@@ -1578,7 +1537,7 @@ static int proc_get_country_code(struct seq_file *m, void *v)
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 
 	if (rfctl->country_ent)
-		dump_country_chplan(m, rfctl->country_ent, 0);
+		dump_country_chplan(m, rfctl->country_ent);
 	else
 		RTW_PRINT_SEL(m, "unspecified\n");
 

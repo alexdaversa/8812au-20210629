@@ -86,17 +86,18 @@ static void rtw_dev_shutdown(struct device *dev)
 
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 23))
 /* Some useful macros to use to create struct usb_device_id */
-#define USB_DEVICE_ID_MATCH_VENDOR			0x0001
-#define USB_DEVICE_ID_MATCH_PRODUCT			0x0002
-#define USB_DEVICE_ID_MATCH_DEV_LO			0x0004
-#define USB_DEVICE_ID_MATCH_DEV_HI			0x0008
-#define USB_DEVICE_ID_MATCH_DEV_CLASS			0x0010
-#define USB_DEVICE_ID_MATCH_DEV_SUBCLASS		0x0020
-#define USB_DEVICE_ID_MATCH_DEV_PROTOCOL		0x0040
-#define USB_DEVICE_ID_MATCH_INT_CLASS			0x0080
-#define USB_DEVICE_ID_MATCH_INT_SUBCLASS		0x0100
-#define USB_DEVICE_ID_MATCH_INT_PROTOCOL		0x0200
-#define USB_DEVICE_ID_MATCH_INT_NUMBER			0x0400
+#define USB_DEVICE_ID_MATCH_VENDOR			 0x0001
+#define USB_DEVICE_ID_MATCH_PRODUCT			 0x0002
+#define USB_DEVICE_ID_MATCH_DEV_LO			 0x0004
+#define USB_DEVICE_ID_MATCH_DEV_HI			 0x0008
+#define USB_DEVICE_ID_MATCH_DEV_CLASS			 0x0010
+#define USB_DEVICE_ID_MATCH_DEV_SUBCLASS		 0x0020
+#define USB_DEVICE_ID_MATCH_DEV_PROTOCOL		 0x0040
+#define USB_DEVICE_ID_MATCH_INT_CLASS			 0x0080
+#define USB_DEVICE_ID_MATCH_INT_SUBCLASS		 0x0100
+#define USB_DEVICE_ID_MATCH_INT_PROTOCOL		 0x0200
+#define USB_DEVICE_ID_MATCH_INT_NUMBER		 0x0400
+
 
 #define USB_DEVICE_ID_MATCH_INT_INFO \
 	(USB_DEVICE_ID_MATCH_INT_CLASS | \
@@ -170,24 +171,12 @@ static struct usb_device_id rtw_usb_id_tbl[] = {
 	{USB_DEVICE(0x0E66, 0x0022), .driver_info = RTL8812}, /* HAWKING - Edimax */
 	{USB_DEVICE(0x0586, 0x3426), .driver_info = RTL8812}, /* ZyXEL - */
 	{USB_DEVICE(0x2001, 0x3313), .driver_info = RTL8812}, /* D-Link - ALPHA */
-	{USB_DEVICE(0x1058, 0x0632), .driver_info = RTL8812}, /* WD - Cybertan */
+	{USB_DEVICE(0x1058, 0x0632), .driver_info = RTL8812}, /* WD - Cybertan*/
 	{USB_DEVICE(0x1740, 0x0100), .driver_info = RTL8812}, /* EnGenius - EnGenius */
 	{USB_DEVICE(0x2019, 0xAB30), .driver_info = RTL8812}, /* Planex - Abocom */
 	{USB_DEVICE(0x07B8, 0x8812), .driver_info = RTL8812}, /* Abocom - Abocom */
 	{USB_DEVICE(0x2001, 0x3315), .driver_info = RTL8812}, /* D-Link - Cameo */
 	{USB_DEVICE(0x2001, 0x3316), .driver_info = RTL8812}, /* D-Link - Cameo */
-	{USB_DEVICE(0x0846, 0x9051), .driver_info = RTL8812}, /* Netgear A6200 v2 */
-	{USB_DEVICE(0x13B1, 0x003F), .driver_info = RTL8812}, /* Linksys - WUSB6300 */
-	{USB_DEVICE(0x2357, 0x0101), .driver_info = RTL8812}, /* TP-Link - Archer T4U AC1200 */
-	{USB_DEVICE(0x2357, 0x0103), .driver_info = RTL8812}, /* TP-Link - T4UH */
-	{USB_DEVICE(0x2357, 0x010D), .driver_info = RTL8812}, /* TP-Link - Archer T4U AC1300 */
-	{USB_DEVICE(0x2357, 0x010E), .driver_info = RTL8812}, /* TP-Link - Archer T4UH AC1300 */
-	{USB_DEVICE(0x2357, 0x010F), .driver_info = RTL8812}, /* TP-Link - T4UHP */
-	{USB_DEVICE(0x20F4, 0x805B), .driver_info = RTL8812}, /* TRENDnet - TEW-805UB */
-	{USB_DEVICE(0x0411, 0x025D), .driver_info = RTL8812}, /* Buffalo - WI-U3-866D */
-	{USB_DEVICE(0x050D, 0x1109), .driver_info = RTL8812}, /* Belkin F9L1109 - SerComm */
-	{USB_DEVICE(0x148F, 0x9097), .driver_info = RTL8812}, /* Amped Wireless ACA1 */
-	{USB_DEVICE(0x2604, 0x0012), .driver_info = RTL8812}, /* Tenda U12 */
 #endif
 
 #ifdef CONFIG_RTL8821A
@@ -195,11 +184,12 @@ static struct usb_device_id rtw_usb_id_tbl[] = {
 	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0x0811), .driver_info = RTL8821}, /* Default ID */
 	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0x0821), .driver_info = RTL8821}, /* Default ID */
 	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0x8822), .driver_info = RTL8821}, /* Default ID */
-	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0xA811), .driver_info = RTL8821}, /* Default ID */
+	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0xA811) , .driver_info = RTL8821},/* Default ID */
 	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDER_ID_REALTEK, 0x0820, 0xff, 0xff, 0xff), .driver_info = RTL8821}, /* 8821AU */
 	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDER_ID_REALTEK, 0x0823, 0xff, 0xff, 0xff), .driver_info = RTL8821}, /* 8821AU */
 	/*=== Customer ID ===*/
 	{USB_DEVICE(0x7392, 0xA811), .driver_info = RTL8821}, /* Edimax - Edimax */
+	{USB_DEVICE(0x7392, 0xA812), .driver_info = RTL8821}, /* Edimax - Edimax */
 	{USB_DEVICE(0x04BB, 0x0953), .driver_info = RTL8821}, /* I-O DATA - Edimax */
 	{USB_DEVICE(0x2001, 0x3314), .driver_info = RTL8821}, /* D-Link - Cameo */
 	{USB_DEVICE(0x2001, 0x3318), .driver_info = RTL8821}, /* D-Link - Cameo */
@@ -303,8 +293,7 @@ static struct usb_device_id rtw_usb_id_tbl[] = {
 #endif /* CONFIG_RTL8814B */
 #ifdef CONFIG_RTL8723F
 	/*=== Realtek IC ===*/
-	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDER_ID_REALTEK, 0xB733, 0xff, 0xff, 0xff), .driver_info = RTL8723F}, /* USB multi-fuction */
-	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDER_ID_REALTEK, 0xF72B, 0xff, 0xff, 0xff), .driver_info = RTL8723F}, /* USB Single-fuction, WiFi only */
+	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDER_ID_REALTEK, 0xB733, 0xff, 0xff, 0xff), .driver_info = RTL8723F}, 
 #endif
 
 	{}	/* Terminating entry */

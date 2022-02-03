@@ -32,8 +32,8 @@
  * 1 ============================================================
  ***************************************************************/
 
-#define PHYDM_CODE_BASE			"PHYDM_V050"
-#define PHYDM_RELEASE_DATE		"20201019.0"
+#define PHYDM_CODE_BASE			"PHYDM_V049"
+#define PHYDM_RELEASE_DATE		"20200720.0"
 
 /*PHYDM API status*/
 #define	PHYDM_SET_FAIL			0

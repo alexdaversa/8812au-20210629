@@ -1204,11 +1204,10 @@ void halrf_supportability_init_mp(void *dm_void)
 #if (RTL8723F_SUPPORT == 1)
 	case ODM_RTL8723F:
 		rf->rf_supportability =
-			HAL_RF_TX_PWR_TRACK |
+			/*@HAL_RF_TX_PWR_TRACK |*/
 			HAL_RF_IQK |
 			HAL_RF_LCK |
 			HAL_RF_DPK |
-			HAL_RF_TXGAPK |
 			HAL_RF_DPK_TRACK |
 			0;
 		break;
@@ -1376,11 +1375,10 @@ void halrf_supportability_init(void *dm_void)
 #if (RTL8723F_SUPPORT == 1)
 		case ODM_RTL8723F:
 			rf->rf_supportability =
-				HAL_RF_TX_PWR_TRACK |
+				/*@HAL_RF_TX_PWR_TRACK |*/
 				HAL_RF_IQK |
 				HAL_RF_LCK |
 				HAL_RF_DPK |
-				HAL_RF_TXGAPK |
 				HAL_RF_DPK_TRACK |
 				0;
 			break;
@@ -1412,14 +1410,9 @@ void halrf_watchdog(void *dm_void)
 	if (rf->is_dpk_in_progress || dm->rf_calibrate_info.is_iqk_in_progress ||
 		rf->is_tssi_in_progress)
 		return;
-#if !(RTL8723F_SUPPORT == 1)
-	phydm_rf_watchdog(dm);
-#endif
-	halrf_dpk_track(dm);
-#if (RTL8723F_SUPPORT == 1)
-		halrf_xtal_thermal_track(dm);
-#endif
 
+	phydm_rf_watchdog(dm);
+	halrf_dpk_track(dm);
 }
 
 #if 0
@@ -1468,13 +1461,6 @@ void halrf_rfk_power_save(void *dm_void, boolean is_power_save)
 		halrf_rfk_power_save_8822c(dm, is_power_save);
 	break;
 #endif
-
-#if (RTL8723F_SUPPORT == 1)
-	case ODM_RTL8723F:
-		halrf_rfk_power_save_8723f(dm, is_power_save);
-	break;
-#endif
-
 	default:
 	break;
 	}
@@ -1530,11 +1516,6 @@ void halrf_rfk_handshake(void *dm_void, boolean is_before_k)
 			halrf_rfk_handshake_8710c(dm, is_before_k);
 			break;
 #endif
-#if (RTL8723F_SUPPORT == 1)
-		case ODM_RTL8723F:
-			halrf_rfk_handshake_8723f(dm, is_before_k);
-			break;
-#endif
 		default:
 			break;
 	}
@@ -1583,18 +1564,13 @@ void halrf_rf_k_connect_trigger(void *dm_void, boolean is_recovery,
 	/*[TSSI Trk]*/
 	halrf_tssi_trigger(dm);
 	/*[DPK]*/
-#if 1
 	if(dpk_info->is_dpk_by_channel == true)
 		halrf_dpk_trigger(dm);
 	else
 		halrf_dpk_reload(dm);
-#endif
 	//ADDA restore to MP_UI setting;
 	config_halrf_path_adda_setting_trigger(dm);
 
-#if (RTL8723F_SUPPORT == 1)
-	halrf_spur_compensation_8723f(dm);
-#endif
 	halrf_bbreset(dm);
 }
 
@@ -1718,7 +1694,6 @@ void halrf_segment_iqk_trigger(void *dm_void, boolean clear,
 	if (iqk_info->rfk_forbidden)
 		return;
 
-	rf->rfk_type = RF01_IQK;
 	halrf_rfk_handshake(dm, true);
 
 	if (!dm->rf_calibrate_info.is_iqk_in_progress) {
@@ -1840,12 +1815,6 @@ void halrf_segment_iqk_trigger(void *dm_void, boolean clear,
 			phy_iq_calibrate_8814a(dm, false);
 			break;
 #endif
-#if (RTL8723F_SUPPORT == 1)
-		case ODM_RTL8723F:
-			phy_iq_calibrate_8723f(dm, false);
-			break;
-#endif
-
 		default:
 			break;
 		}
@@ -1902,7 +1871,6 @@ void halrf_iqk_trigger(void *dm_void, boolean is_recovery)
 	if (iqk_info->rfk_forbidden)
 		return;
 
-	rf->rfk_type = RF01_IQK;
 	halrf_rfk_handshake(dm, true);
 
 	if (!dm->rf_calibrate_info.is_iqk_in_progress) {
@@ -2024,7 +1992,7 @@ void halrf_iqk_trigger(void *dm_void, boolean is_recovery)
 #endif
 #if (RTL8723F_SUPPORT == 1)
 		case ODM_RTL8723F:
-			phy_iq_calibrate_8723f(dm, is_recovery);
+			phy_iq_calibrate_8723f(dm, false, false);
 			break;
 #endif
 
@@ -2278,12 +2246,6 @@ void halrf_x2k_check(struct dm_struct *dm)
 		phy_x2_check_8812f(dm);
 		break;
 #endif
-	case ODM_RTL8723F:
-#if (RTL8723F_SUPPORT == 1)
-		phy_x2_check_8723f(dm);
-		break;
-#endif
-
 	default:
 		break;
 	}
@@ -2349,10 +2311,6 @@ void halrf_init(void *dm_void)
 	halrf_tssi_dck(dm, true);
 	halrf_tssi_get_efuse(dm);
 	halrf_tssi_set_de(dm);
-#if (RTL8723F_SUPPORT == 1)
-	halrf_do_tssi(dm);
-	halrf_rx_port_ctl_8723f(dm);
-#endif
 
 	/*TX Gap K*/
 	halrf_txgapk_write_gain_table(dm);
@@ -2393,7 +2351,6 @@ void halrf_dpk_trigger(void *dm_void)
 	if (iqk_info->rfk_forbidden)
 		return;
 
-	rf->rfk_type = RF03_DPK;
 	halrf_rfk_handshake(dm, true);
 
 	if (!rf->is_dpk_in_progress) {
@@ -2839,12 +2796,6 @@ void halrf_dpk_enable_disable(void *dm_void)
 #if (RTL8197G_SUPPORT == 1)
 	case ODM_RTL8197G:
 		dpk_enable_disable_8197g(dm);
-		break;
-#endif
-
-#if (RTL8723F_SUPPORT == 1)
-	case ODM_RTL8723F:
-		dpk_enable_disable_8723f(dm);
 		break;
 #endif
 
@@ -3415,7 +3366,6 @@ void halrf_txgapk_trigger(void *dm_void)
 	if (!(rf->rf_supportability & HAL_RF_TXGAPK))
 		return;
 
-	rf->rfk_type = RF04_TXGAPK;
 	halrf_rfk_handshake(dm, true);
 
 	start_time = odm_get_current_time(dm);
@@ -3446,12 +3396,6 @@ void halrf_txgapk_trigger(void *dm_void)
 #if (RTL8822C_SUPPORT == 1)
 	case ODM_RTL8822C:
 		halrf_txgapk_8822c(dm);
-	break;
-#endif
-
-#if (RTL8723F_SUPPORT == 1)
-	case ODM_RTL8723F:
-		halrf_txgapk_8723f(dm);
 	break;
 #endif
 
@@ -3499,12 +3443,6 @@ void halrf_tssi_get_efuse(void *dm_void)
 	}
 #endif
 
-#if (RTL8723F_SUPPORT == 1)
-	if (dm->support_ic_type & ODM_RTL8723F) {
-		halrf_tssi_get_efuse_8723f(dm);
-	}
-#endif
-
 }
 
 void halrf_do_rxbb_dck(void *dm_void)
@@ -3536,14 +3474,6 @@ void halrf_do_tssi(void *dm_void)
 #if (RTL8197G_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8197G)
 		halrf_do_tssi_8197g(dm);
-#endif
-
-#if (RTL8723F_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8723F) {
-		halrf_rfk_power_save(dm, false);
-		halrf_do_tssi_8723f(dm);
-		halrf_rfk_power_save(dm, true);
-	}
 #endif
 
 }
@@ -3588,10 +3518,6 @@ u32 halrf_set_tssi_value(void *dm_void, u32 tssi_value)
 	if (dm->support_ic_type & ODM_RTL8814B)
 		return halrf_set_tssi_value_8814b(dm, tssi_value);
 #endif
-#if (RTL8723F_SUPPORT == 1)
-		if (dm->support_ic_type & ODM_RTL8723F)
-		return halrf_tssi_set_de_8723f(dm, tssi_value);
-#endif
 
 	return 0;
 }
@@ -3629,10 +3555,6 @@ void halrf_tssi_set_de_for_tx_verify(void *dm_void, u32 tssi_de, u8 path)
 		halrf_tssi_set_de_for_tx_verify_8197g(dm, tssi_de, path);
 #endif
 
-#if (RTL8723F_SUPPORT == 1)
-	if (dm->support_ic_type & ODM_RTL8723F)
-		halrf_tssi_set_de_for_tx_verify_8723f(dm, tssi_de, path);
-#endif
 }
 
 u32 halrf_query_tssi_value(void *dm_void)
@@ -3855,18 +3777,6 @@ u32 halrf_tssi_get_de(void *dm_void, u8 path)
 	if (dm->support_ic_type & ODM_RTL8197G)
 		return halrf_tssi_get_de_8197g(dm, path);
 #endif
-
-	return 0;
-}
-
-u32 halrf_get_online_tssi_de(void *dm_void, u8 path, s32 pout)
-{
-	struct dm_struct *dm = (struct dm_struct *)dm_void;
-
-#if (RTL8723F_SUPPORT == 1)
-	if (dm->support_ic_type & ODM_RTL8723F)
-		return halrf_get_online_tssi_de_8723f(dm, path, pout);
-#endif
 	return 0;
 }
 
@@ -3936,114 +3846,6 @@ void halrf_txgap_enable_disable(void *dm_void, u8 enable)
 		halrf_txgapk_reload_tx_gain(dm);
 	}
 }
-
-#if (RTL8723F_SUPPORT == 1)
-void halrf_xtal_thermal_track(void *dm_void)
-{
-	struct dm_struct *dm = (struct dm_struct *)dm_void;
-	struct _hal_rf_ *rf = &dm->rf_table;
-	struct _halrf_tssi_data *tssi = &rf->halrf_tssi_data;
-	struct dm_rf_calibration_struct *cali_info = &(dm->rf_calibrate_info);
-	s8	*delta_swing_table_xtal_up = NULL;
-	u8	xtal_offset_eanble = 0, i =0;
-	s8	thermal_value = 0, thermal_detla = 0;
-	u8  	thermal_base = 0;
-	s8  	xtal_table_up[DELTA_SWINGIDX_SIZE] = {0};
-	s8  	xtal_table_down[DELTA_SWINGIDX_SIZE] = {0};
-	u32 	reg_val = 0, crystal_cap = 0;
-
-	RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-	       "[RF][xtal] ======>%s\n", __func__);
-
-	if ( dm->support_ic_type == ODM_RTL8723F) {	
-		if (rf->is_dpk_in_progress || dm->rf_calibrate_info.is_iqk_in_progress ||
-		    dm->is_psd_in_process || rf->is_tssi_in_progress ||
-		    !(rf->rf_supportability & HAL_RF_DPK_TRACK) || 
-		    rf->is_txgapk_in_progress)
-			return;
-
-		if(tssi->thermal[0] == 0xff) {
-			//RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "[RF][xtal] thermal 0xFF, return!\n");
-			return;
-		} else {
-			thermal_base = tssi->thermal[0];
-			//RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "[RF][xtal] thermal_base = 0x%x\n", thermal_base);
-		}
-
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "[RF][xtal] thermal_base = 0x%x\n", thermal_base);
-		
-		thermal_value = (s8)odm_get_rf_reg(dm, RF_PATH_A, RF_0x42, 0x7E);	/* 0x42: RF Reg[6:1]*/
-
-		thermal_detla = (s8)(thermal_value - thermal_base);
-		
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "[RF][xtal] cali_info->xtal_offset = 0x%x\n", cali_info->xtal_offset);
-
-		cali_info->xtal_offset_last = cali_info->xtal_offset;
-		/*
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-						   "[RF][Xtal] cali_info->delta_swing_table_xtal_p = %d\n", cali_info->delta_swing_table_xtal_p[2]);
-		*/
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] thermal_value = 0x%x, thermal_detla = 0x%x, xtal_offset_last = 0x%x\n", 
-		       thermal_value, thermal_detla, cali_info->xtal_offset_last);
-		odm_move_memory(dm, xtal_table_up, cali_info->delta_swing_table_xtal_p, sizeof(xtal_table_up));//(void *)
-		odm_move_memory(dm, xtal_table_down, cali_info->delta_swing_table_xtal_n, sizeof(xtal_table_down));
-		/*
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-						   "[RF][Xtal] xtal_table_up[1] = %d\n", xtal_table_up[1]);*/
-		if(thermal_detla < 0) {
-			
-			if (thermal_detla < -29)
-				i = 29;
-			else
-				i = (u8)(-1 * thermal_detla);
-			cali_info->xtal_offset = xtal_table_down[i];
-		} else {
-
-			if (thermal_detla >= 30)
-				i = 29;
-			else
-				i = thermal_detla;
-
-			cali_info->xtal_offset = xtal_table_up[i];
-		}
-		
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] xtal_offset = %d\n", cali_info->xtal_offset);
-		if (cali_info->xtal_offset_last == cali_info->xtal_offset)
-			xtal_offset_eanble = 0;
-		else
-			xtal_offset_eanble = 1;
-		RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] xtal_offset_eanble = %d\n", xtal_offset_eanble);
-		if (xtal_offset_eanble != 0) {
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "**********Enter Xtal Tracking**********\n");
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] R_0x103c[16:10] = 0x%x\n", odm_get_mac_reg(dm, R_0x103c, 0x0001FC00));
-
-			crystal_cap = dm->dm_cfo_track.crystal_cap_default & 0x7F;
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] DEFAULT crystal_cap = 0x%x\n", crystal_cap);
-			reg_val = crystal_cap + cali_info->xtal_offset;
-			//reg_val = (u32)(odm_get_mac_reg(dm, R_0x103c, 0x0001FC00) + cali_info->xtal_offset);
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] reg_val = 0x%x\n", reg_val);
-			/* write 0x103c[23:17] = 0x103c[16:10] = crystal_cap */
-			crystal_cap = reg_val | (reg_val << 7);
-			odm_set_mac_reg(dm, R_0x103c, 0x00FFFC00, crystal_cap);
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] R_0x103c[16:10] = 0x%x\n", odm_get_mac_reg(dm, R_0x103c, 0x0001FC00));
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-		       "[RF][Xtal] R_0x103c[23:17] = 0x%x\n", odm_get_mac_reg(dm, R_0x103c, 0x00FE0000));
-			RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "**********End Xtal Tracking**********\n");
-		}
-		//odm_set_rf_reg(dm, RF_PATH_A, RF_0x42, 0x30000, 0x3);
-		//delay
-	}
-	/*RF_DBG(dm, DBG_RF_TX_PWR_TRACK,
-	       "[RF][xtal] <======%s\n", __func__);*/
-}
-#endif
 
 void _halrf_dump_subpage(void *dm_void, u32 *_used, char *output, u32 *_out_len, u8 page)
 {

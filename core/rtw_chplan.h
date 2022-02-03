@@ -56,35 +56,6 @@ u8 rtw_process_beacon_hint(_adapter *adapter, WLAN_BSSID_EX *bss);
 #define RTW_MODULE_RTL8821CE			BIT10	/* RTL8821CE */
 #define RTW_MODULE_RTL8822CE			BIT11	/* RTL8822CE */
 
-enum rtw_regd {
-	RTW_REGD_NA = 0,
-	RTW_REGD_FCC = 1,
-	RTW_REGD_MKK = 2,
-	RTW_REGD_ETSI = 3,
-	RTW_REGD_IC = 4,
-	RTW_REGD_KCC = 5,
-	RTW_REGD_NCC = 6,
-	RTW_REGD_ACMA = 7,
-	RTW_REGD_CHILE = 8,
-	RTW_REGD_MEX = 9,
-	RTW_REGD_WW,
-	RTW_REGD_NUM,
-};
-
-extern const char *const _regd_str[];
-#define regd_str(regd) (((regd) >= RTW_REGD_NUM) ? _regd_str[RTW_REGD_NA] : _regd_str[(regd)])
-
-enum rtw_edcca_mode {
-	RTW_EDCCA_NORMAL	= 0, /* normal */
-	RTW_EDCCA_ADAPT		= 1, /* adaptivity */
-	RTW_EDCCA_CS		= 2, /* carrier sense */
-	RTW_EDCCA_MODE_NUM,
-	RTW_EDCCA_MODE_AUTO	= 0xFF, /* folllow channel plan */
-};
-
-extern const char *const _rtw_edcca_mode_str[];
-#define rtw_edcca_mode_str(mode) (((mode) >= RTW_EDCCA_MODE_NUM) ? _rtw_edcca_mode_str[RTW_EDCCA_NORMAL] : _rtw_edcca_mode_str[(mode)])
-
 enum rtw_dfs_regd {
 	RTW_DFS_REGD_NONE	= 0,
 	RTW_DFS_REGD_FCC	= 1,
@@ -97,77 +68,25 @@ enum rtw_dfs_regd {
 extern const char *_rtw_dfs_regd_str[];
 #define rtw_dfs_regd_str(region) (((region) >= RTW_DFS_REGD_NUM) ? _rtw_dfs_regd_str[RTW_DFS_REGD_NONE] : _rtw_dfs_regd_str[(region)])
 
-typedef enum _REGULATION_TXPWR_LMT {
-	TXPWR_LMT_NONE = 0, /* no limit */
-	TXPWR_LMT_FCC = 1,
-	TXPWR_LMT_MKK = 2,
-	TXPWR_LMT_ETSI = 3,
-	TXPWR_LMT_IC = 4,
-	TXPWR_LMT_KCC = 5,
-	TXPWR_LMT_NCC = 6,
-	TXPWR_LMT_ACMA = 7,
-	TXPWR_LMT_CHILE = 8,
-	TXPWR_LMT_UKRAINE = 9,
-	TXPWR_LMT_MEXICO = 10,
-	TXPWR_LMT_CN = 11,
-	TXPWR_LMT_QATAR = 12,
-	TXPWR_LMT_WW, /* smallest of all available limit, keep last */
-
-	TXPWR_LMT_NUM,
-	TXPWR_LMT_DEF = TXPWR_LMT_NUM, /* default (ref to domain code), used at country chplan map's override field */
-} REGULATION_TXPWR_LMT;
-
-extern const char *const _txpwr_lmt_str[];
-#define txpwr_lmt_str(regd) (((regd) > TXPWR_LMT_WW) ? _txpwr_lmt_str[TXPWR_LMT_WW] : _txpwr_lmt_str[(regd)])
-
-extern const REGULATION_TXPWR_LMT _txpwr_lmt_alternate[];
-#define txpwr_lmt_alternate(ori) (((ori) > TXPWR_LMT_WW) ? _txpwr_lmt_alternate[TXPWR_LMT_WW] : _txpwr_lmt_alternate[(ori)])
-
-#define TXPWR_LMT_ALTERNATE_DEFINED(txpwr_lmt) (txpwr_lmt_alternate(txpwr_lmt) != txpwr_lmt)
-
-extern const enum rtw_edcca_mode _rtw_regd_to_edcca_mode[RTW_REGD_NUM];
-#define rtw_regd_to_edcca_mode(regd) (((regd) >= RTW_REGD_NUM) ? RTW_EDCCA_NORMAL : _rtw_regd_to_edcca_mode[(regd)])
-
-extern const REGULATION_TXPWR_LMT _rtw_regd_to_txpwr_lmt[];
-#define rtw_regd_to_txpwr_lmt(regd) (((regd) >= RTW_REGD_NUM) ? TXPWR_LMT_WW : _rtw_regd_to_txpwr_lmt[(regd)])
-
-#define EDCCA_MODES_STR_LEN (((6 + 3 + 1) * BAND_MAX) + 1)
-char *rtw_get_edcca_modes_str(char *buf, u8 modes[]);
-void rtw_edcca_mode_update(struct dvobj_priv *dvobj);
-u8 rtw_get_edcca_mode(struct dvobj_priv *dvobj, BAND_TYPE band);
-
-#define CCHPLAN_PROTO_EN_AC		BIT0
-#define CCHPLAN_PROTO_EN_AX		BIT1
-#define CCHPLAN_PROTO_EN_ALL	0xFF
-
 struct country_chplan {
 	char alpha2[2]; /* "00" means worldwide */
 	u8 chplan;
-	u8 txpwr_lmt_override;
-#if defined(CONFIG_80211AX_HE) || defined(CONFIG_80211AC_VHT)
-	u8 proto_en;
+#ifdef CONFIG_80211AC_VHT
+	u8 en_11ac;
 #endif
 };
 
 #ifdef CONFIG_80211AC_VHT
-#define COUNTRY_CHPLAN_EN_11AC(_ent) ((_ent)->proto_en & CCHPLAN_PROTO_EN_AC)
+#define COUNTRY_CHPLAN_EN_11AC(_ent) ((_ent)->en_11ac)
 #else
 #define COUNTRY_CHPLAN_EN_11AC(_ent) 0
 #endif
 
-#ifdef CONFIG_80211AX_HE
-#define COUNTRY_CHPLAN_EN_11AX(_ent) ((_ent)->proto_en & CCHPLAN_PROTO_EN_AX)
-#else
-#define COUNTRY_CHPLAN_EN_11AX(_ent) 0
-#endif
-
 const struct country_chplan *rtw_get_chplan_from_country(const char *country_code);
 
-void dump_country_chplan(void *sel, const struct country_chplan *ent, bool regd_info);
-void dump_country_chplan_map(void *sel, bool regd_info);
-void dump_country_list(void *sel);
+void dump_country_chplan(void *sel, const struct country_chplan *ent);
+void dump_country_chplan_map(void *sel);
 void dump_chplan_id_list(void *sel);
-void dump_chplan_country_list(void *sel);
 #ifdef CONFIG_RTW_DEBUG
 void dump_chplan_test(void *sel);
 #endif

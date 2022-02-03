@@ -440,7 +440,7 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 			if (config_type == CONFIG_RF_RADIO) {
 				if (e_rf_path == RF_PATH_A)
 					READ_AND_CONFIG_MP(8723f, _radioa);
-				else if (e_rf_path == RF_PATH_B)
+				if (e_rf_path == RF_PATH_B)
 					READ_AND_CONFIG_MP(8723f, _radiob);
 			} else if (config_type == CONFIG_RF_TXPWR_LMT) {
 				READ_AND_CONFIG_MP(8723f, _txpwr_lmt);
@@ -842,13 +842,8 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 #endif
 
 #if (RTL8723F_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8723F) {
-		if (dm->en_tssi_mode)
-			READ_AND_CONFIG_MP(8723f, _txpowertracktssi);
-		else
+		if (dm->support_ic_type == ODM_RTL8723F)
 			READ_AND_CONFIG_MP(8723f, _txpowertrack);
-		READ_AND_CONFIG_MP(8723f, _txxtaltrack);
-	}
 #endif
 #if (RTL8812F_SUPPORT)
 	if (dm->support_ic_type == ODM_RTL8812F) {
@@ -862,8 +857,6 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 			READ_AND_CONFIG_MP(8812f, _txpowertrack_type3);
 		else if (dm->rfe_type == 4)
 			READ_AND_CONFIG_MP(8812f, _txpowertrack_type4);
-		else if (dm->rfe_type == 5)
-			READ_AND_CONFIG_MP(8812f, _txpowertrack_type5);
 		else
 			READ_AND_CONFIG_MP(8812f, _txpowertrack);
 	}

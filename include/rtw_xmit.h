@@ -864,9 +864,6 @@ struct	xmit_priv	{
 #ifdef CONFIG_PCI_TX_POLLING
 	_timer tx_poll_timer;
 #endif
-#ifdef CONFIG_LAYER2_ROAMING
-	_queue	rpkt_queue;
-#endif
 	_lock lock_sctx;
 
 };
@@ -1067,7 +1064,6 @@ void dump_xmit_block(void *sel, _adapter *padapter);
 void rtw_set_xmit_block(_adapter *padapter, enum XMIT_BLOCK_REASON reason);
 void rtw_clr_xmit_block(_adapter *padapter, enum XMIT_BLOCK_REASON reason);
 bool rtw_is_xmit_blocked(_adapter *padapter);
-void rtw_hci_flush(_adapter *padapter);
 
 /* include after declaring struct xmit_buf, in order to avoid warning */
 #include <xmit_osdep.h>

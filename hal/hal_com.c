@@ -1076,6 +1076,30 @@ void rtw_hal_dump_macaddr(void *sel, _adapter *adapter)
 #endif
 }
 
+/**
+ * rtw_hal_set_hw_macaddr() - Set HW MAC address
+ * @adapter:	struct PADAPTER
+ * @mac_addr:   6-bytes mac address
+ *
+ * Set Wifi Mac address by writing to the relative HW registers,
+ *
+ */
+void rtw_hal_set_hw_macaddr(PADAPTER adapter, u8 *mac_addr)
+{
+	rtw_ps_deny(adapter, PS_DENY_IOCTL);
+	LeaveAllPowerSaveModeDirect(adapter);
+
+#ifdef CONFIG_MI_WITH_MBSSID_CAM
+	rtw_hal_change_macaddr_mbid(adapter, mac_addr);
+#else
+	rtw_hal_set_hwreg(adapter, HW_VAR_MAC_ADDR, mac_addr);
+#endif
+#ifdef CONFIG_RTW_DEBUG
+	rtw_hal_dump_macaddr(RTW_DBGDUMP, adapter);
+#endif
+	rtw_ps_deny_cancel(adapter, PS_DENY_IOCTL);
+}
+
 #ifdef RTW_HALMAC
 void rtw_hal_hw_port_enable(_adapter *adapter)
 {
@@ -2010,10 +2034,10 @@ void rtw_hal_update_sta_wset(_adapter *adapter, struct sta_info *psta)
 	if ((psta->wireless_mode & WIRELESS_11G) || (psta->wireless_mode & WIRELESS_11A))
 		w_set |= WIRELESS_OFDM;
 
-	if ((psta->wireless_mode & WIRELESS_11_24N) || (psta->wireless_mode & WIRELESS_11_5N))
+	if (psta->wireless_mode & WIRELESS_11_24N)
 		w_set |= WIRELESS_HT;
 
-	if (psta->wireless_mode & WIRELESS_11AC)
+	if ((psta->wireless_mode & WIRELESS_11AC) || (psta->wireless_mode & WIRELESS_11_5N))
 		w_set |= WIRELESS_VHT;
 
 	psta->cmn.support_wireless_set = w_set;
@@ -3587,14 +3611,14 @@ void rtw_hal_rcr_set_chk_bssid(_adapter *adapter, u8 self_action)
 	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(adapter);
 	struct hal_spec_t *hal_spec = GET_HAL_SPEC(adapter);
 	u32 rcr, rcr_new;
-#if !defined(CONFIG_MI_WITH_MBSSID_CAM) || defined(CONFIG_CLIENT_PORT_CFG) || defined(CONFIG_RTW_MULTI_AP)
 	struct mi_state mstate, mstate_s;
-#endif
 
 	rtw_hal_get_hwreg(adapter, HW_VAR_RCR, (u8 *)&rcr);
 	rcr_new = rcr;
 
-#if !defined(CONFIG_MI_WITH_MBSSID_CAM) || defined(CONFIG_CLIENT_PORT_CFG) || defined(CONFIG_RTW_MULTI_AP)
+#if defined(CONFIG_MI_WITH_MBSSID_CAM) && !defined(CONFIG_CLIENT_PORT_CFG)
+	rcr_new &= ~(RCR_CBSSID_BCN | RCR_CBSSID_DATA);
+#else
 	rtw_mi_status_no_self(adapter, &mstate);
 	rtw_mi_status_no_others(adapter, &mstate_s);
 
@@ -3654,11 +3678,7 @@ void rtw_hal_rcr_set_chk_bssid(_adapter *adapter, u8 self_action)
 	};
 
 	rtw_mi_status_merge(&mstate, &mstate_s);
-#endif /* !defined(CONFIG_MI_WITH_MBSSID_CAM) || defined(CONFIG_CLIENT_PORT_CFG) || defined(CONFIG_RTW_MULTI_AP) */
 
-#if defined(CONFIG_MI_WITH_MBSSID_CAM) && !defined(CONFIG_CLIENT_PORT_CFG)
-	rcr_new &= ~(RCR_CBSSID_BCN | RCR_CBSSID_DATA);
-#else
 	if (MSTATE_AP_NUM(&mstate) || MSTATE_MESH_NUM(&mstate) || MSTATE_TDLS_LD_NUM(&mstate)
 		#ifdef CONFIG_FIND_BEST_CHANNEL
 		|| MSTATE_SCAN_ENTER_NUM(&mstate)
@@ -9246,1473 +9266,6 @@ static void rtw_hal_construct_remote_control_info(_adapter *adapter,
 	}
 }
 
-static void rtw_hal_gate_bb(_adapter *adapter, bool stop)
-{
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	u8 i = 0, val8 = 0, empty = _FAIL;
-
-	if (stop) {
-		/* checking TX queue status */
-		for (i = 0 ; i < 5 ; i++) {
-			rtw_hal_get_hwreg(adapter, HW_VAR_CHK_MGQ_CPU_EMPTY, &empty);
-			if (empty) {
-				break;
-			} else {
-				RTW_WARN("%s: MGQ_CPU is busy(%d)!\n",
-					 __func__, i);
-				rtw_mdelay_os(10);
-			}
-		}
-
-		if (val8 == 5)
-			RTW_ERR("%s: Polling MGQ_CPU empty fail!\n", __func__);
-
-		/* Pause TX*/
-		pwrpriv->wowlan_txpause_status = rtw_read8(adapter, REG_TXPAUSE);
-		rtw_write8(adapter, REG_TXPAUSE, 0xff);
-		val8 = rtw_read8(adapter, REG_SYS_FUNC_EN);
-		val8 &= ~BIT(0);
-		rtw_write8(adapter, REG_SYS_FUNC_EN, val8);
-		RTW_INFO("%s: BB gated: 0x%02x, store TXPAUSE: %02x\n",
-			 __func__,
-			 rtw_read8(adapter, REG_SYS_FUNC_EN),
-			 pwrpriv->wowlan_txpause_status);
-	} else {
-		val8 = rtw_read8(adapter, REG_SYS_FUNC_EN);
-		val8 |= BIT(0);
-		rtw_write8(adapter, REG_SYS_FUNC_EN, val8);
-		RTW_INFO("%s: BB release: 0x%02x, recover TXPAUSE:%02x\n",
-			 __func__, rtw_read8(adapter, REG_SYS_FUNC_EN),
-			 pwrpriv->wowlan_txpause_status);
-		/* release TX*/
-		rtw_write8(adapter, REG_TXPAUSE, pwrpriv->wowlan_txpause_status);
-	}
-}
-
-static u8 rtw_hal_wow_pattern_generate(_adapter *adapter, u8 idx, struct rtl_wow_pattern *pwow_pattern)
-{
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	 u8 *pattern;
-	 u8 len = 0;
-	 u8 *mask;
-
-	u8 mask_hw[MAX_WKFM_SIZE] = {0};
-	u8 content[MAX_WKFM_PATTERN_SIZE] = {0};
-	u8 broadcast_addr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-	u8 multicast_addr1[2] = {0x33, 0x33};
-	u8 multicast_addr2[3] = {0x01, 0x00, 0x5e};
-	u8 mask_len = 0;
-	u8 mac_addr[ETH_ALEN] = {0};
-	u16 count = 0;
-	int i;
-
-	if (pwrctl->wowlan_pattern_idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("%s pattern_idx is more than MAX_FMC_NUM: %d\n",
-			 __func__, MAX_WKFM_CAM_NUM);
-		return _FAIL;
-	}
-
-	pattern = pwrctl->patterns[idx].content;
-	len = pwrctl->patterns[idx].len;
-	mask = pwrctl->patterns[idx].mask;
-
-	_rtw_memcpy(mac_addr, adapter_mac_addr(adapter), ETH_ALEN);
-	_rtw_memset(pwow_pattern, 0, sizeof(struct rtl_wow_pattern));
-
-	mask_len = DIV_ROUND_UP(len, 8);
-
-	/* 1. setup A1 table */
-	if (memcmp(pattern, broadcast_addr, ETH_ALEN) == 0)
-		pwow_pattern->type = PATTERN_BROADCAST;
-	else if (memcmp(pattern, multicast_addr1, 2) == 0)
-		pwow_pattern->type = PATTERN_MULTICAST;
-	else if (memcmp(pattern, multicast_addr2, 3) == 0)
-		pwow_pattern->type = PATTERN_MULTICAST;
-	else if (memcmp(pattern, mac_addr, ETH_ALEN) == 0)
-		pwow_pattern->type = PATTERN_UNICAST;
-	else
-		pwow_pattern->type = PATTERN_INVALID;
-
-	/* translate mask from os to mask for hw */
-
-	/******************************************************************************
-	 * pattern from OS uses 'ethenet frame', like this:
-
-		|    6   |    6   |   2  |     20    |  Variable  |  4  |
-		|--------+--------+------+-----------+------------+-----|
-		|    802.3 Mac Header    | IP Header | TCP Packet | FCS |
-		|   DA   |   SA   | Type |
-
-	 * BUT, packet catched by our HW is in '802.11 frame', begin from LLC,
-
-		|     24 or 30      |    6   |   2  |     20    |  Variable  |  4  |
-		|-------------------+--------+------+-----------+------------+-----|
-		| 802.11 MAC Header |       LLC     | IP Header | TCP Packet | FCS |
-				    | Others | Tpye |
-
-	 * Therefore, we need translate mask_from_OS to mask_to_hw.
-	 * We should left-shift mask by 6 bits, then set the new bit[0~5] = 0,
-	 * because new mask[0~5] means 'SA', but our HW packet begins from LLC,
-	 * bit[0~5] corresponds to first 6 Bytes in LLC, they just don't match.
-	 ******************************************************************************/
-	/* Shift 6 bits */
-	for (i = 0; i < mask_len - 1; i++) {
-		mask_hw[i] = mask[i] >> 6;
-		mask_hw[i] |= (mask[i + 1] & 0x3F) << 2;
-	}
-
-	mask_hw[i] = (mask[i] >> 6) & 0x3F;
-	/* Set bit 0-5 to zero */
-	mask_hw[0] &= 0xC0;
-
-	for (i = 0; i < (MAX_WKFM_SIZE / 4); i++) {
-		pwow_pattern->mask[i] = mask_hw[i * 4];
-		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 1] << 8);
-		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 2] << 16);
-		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 3] << 24);
-	}
-
-	/* To get the wake up pattern from the mask.
-	 * We do not count first 12 bits which means
-	 * DA[6] and SA[6] in the pattern to match HW design. */
-	count = 0;
-	for (i = 12; i < len; i++) {
-		if ((mask[i / 8] >> (i % 8)) & 0x01) {
-			content[count] = pattern[i];
-			count++;
-		}
-	}
-
-	pwow_pattern->crc = rtw_calc_crc(content, count);
-
-	if (pwow_pattern->crc != 0) {
-		if (pwow_pattern->type == PATTERN_INVALID)
-			pwow_pattern->type = PATTERN_VALID;
-	}
-
-	return _SUCCESS;
-}
-
-void rtw_dump_wow_pattern(void *sel, struct rtl_wow_pattern *pwow_pattern, u8 idx)
-{
-	int j;
-
-	RTW_PRINT_SEL(sel, "=======WOW CAM-ID[%d]=======\n", idx);
-	RTW_PRINT_SEL(sel, "[WOW CAM] type:%d\n", pwow_pattern->type);
-	RTW_PRINT_SEL(sel, "[WOW CAM] crc:0x%04x\n", pwow_pattern->crc);
-	for (j = 0; j < 4; j++)
-		RTW_PRINT_SEL(sel, "[WOW CAM] Mask:0x%08x\n", pwow_pattern->mask[j]);
-}
-/*bit definition of pattern match format*/
-#define WOW_VALID_BIT	BIT31
-#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
-#define WOW_BC_BIT		BIT26
-#define WOW_MC_BIT		BIT25
-#define WOW_UC_BIT		BIT24
-#else
-#define WOW_BC_BIT		BIT18
-#define WOW_UC_BIT		BIT17
-#define WOW_MC_BIT		BIT16
-#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
-
-#ifndef CONFIG_WOW_PATTERN_HW_CAM
-#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
-static void rtw_hal_reset_mac_rx(_adapter *adapter)
-{
-	u8 val8 = 0;
-	/* Set REG_CR bit1, bit3, bit7 to 0*/
-	val8 = rtw_read8(adapter, REG_CR);
-	val8 &= 0x75;
-	rtw_write8(adapter, REG_CR, val8);
-	val8 = rtw_read8(adapter, REG_CR);
-	/* Set REG_CR bit1, bit3, bit7 to 1*/
-	val8 |= 0x8a;
-	rtw_write8(adapter, REG_CR, val8);
-	RTW_INFO("0x%04x: %02x\n", REG_CR, rtw_read8(adapter, REG_CR));
-}
-static void rtw_hal_set_wow_rxff_boundary(_adapter *adapter, bool wow_mode)
-{
-	u8 val8 = 0;
-	u16 rxff_bndy = 0;
-	u32 rx_dma_buff_sz = 0;
-
-	val8 = rtw_read8(adapter, REG_FIFOPAGE + 3);
-	if (val8 != 0)
-		RTW_INFO("%s:[%04x]some PKTs in TXPKTBUF\n",
-			 __func__, (REG_FIFOPAGE + 3));
-
-	rtw_hal_reset_mac_rx(adapter);
-
-	if (wow_mode) {
-		rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
-				    (u8 *)&rx_dma_buff_sz);
-		rxff_bndy = rx_dma_buff_sz - 1;
-
-		rtw_write16(adapter, (REG_TRXFF_BNDY + 2), rxff_bndy);
-		RTW_INFO("%s: wow mode, 0x%04x: 0x%04x\n", __func__,
-			 REG_TRXFF_BNDY + 2,
-			 rtw_read16(adapter, (REG_TRXFF_BNDY + 2)));
-	} else {
-		rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ,
-				    (u8 *)&rx_dma_buff_sz);
-		rxff_bndy = rx_dma_buff_sz - 1;
-		rtw_write16(adapter, (REG_TRXFF_BNDY + 2), rxff_bndy);
-		RTW_INFO("%s: normal mode, 0x%04x: 0x%04x\n", __func__,
-			 REG_TRXFF_BNDY + 2,
-			 rtw_read16(adapter, (REG_TRXFF_BNDY + 2)));
-	}
-}
-#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO*/
-#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
-bool rtw_read_from_frame_mask(_adapter *adapter, u8 idx)
-{
-	u32 data_l = 0, data_h = 0, rx_dma_buff_sz = 0, page_sz = 0;
-	u16 offset, rx_buf_ptr = 0;
-	u16 cam_start_offset = 0;
-	u16 ctrl_l = 0, ctrl_h = 0;
-	u8 count = 0, tmp = 0;
-	int i = 0;
-	bool res = _TRUE;
-
-	if (idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("[Error]: %s, pattern index is out of range\n",
-			 __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
-			    (u8 *)&rx_dma_buff_sz);
-
-	if (rx_dma_buff_sz == 0) {
-		RTW_INFO("[Error]: %s, rx_dma_buff_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_RX_PAGE_SIZE, (u8 *)&page_sz);
-
-	if (page_sz == 0) {
-		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	offset = (u16)PageNum(rx_dma_buff_sz, page_sz);
-	cam_start_offset = offset * page_sz;
-
-	ctrl_l = 0x0;
-	ctrl_h = 0x0;
-
-	/* Enable RX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, RXPKT_BUF_SELECT);
-
-	/* Read the WKFM CAM */
-	for (i = 0; i < (WKFMCAM_ADDR_NUM / 2); i++) {
-		/*
-		 * Set Rx packet buffer offset.
-		 * RxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
-		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
-		 * RxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
-		 * * Index: The index of the wake up frame mask
-		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
-		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
-		 */
-		rx_buf_ptr =
-			(cam_start_offset + idx * WKFMCAM_SIZE + i * 8) >> 3;
-		rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, rx_buf_ptr);
-
-		rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
-		data_l = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_L);
-		data_h = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_H);
-
-		RTW_INFO("[%d]: %08x %08x\n", i, data_h, data_l);
-
-		count = 0;
-
-		do {
-			tmp = rtw_read8(adapter, REG_RXPKTBUF_CTRL);
-			rtw_udelay_os(2);
-			count++;
-		} while (!tmp && count < 100);
-
-		if (count >= 100) {
-			RTW_INFO("%s count:%d\n", __func__, count);
-			res = _FALSE;
-		}
-	}
-
-	/* Disable RX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
-		   DISABLE_TRXPKT_BUF_ACCESS);
-	return res;
-}
-
-bool rtw_write_to_frame_mask(_adapter *adapter, u8 idx,
-			     struct  rtl_wow_pattern *context)
-{
-	u32 data = 0, rx_dma_buff_sz = 0, page_sz = 0;
-	u16 offset, rx_buf_ptr = 0;
-	u16 cam_start_offset = 0;
-	u16 ctrl_l = 0, ctrl_h = 0;
-	u8 count = 0, tmp = 0;
-	int res = 0, i = 0;
-
-	if (idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("[Error]: %s, pattern index is out of range\n",
-			 __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
-			    (u8 *)&rx_dma_buff_sz);
-
-	if (rx_dma_buff_sz == 0) {
-		RTW_INFO("[Error]: %s, rx_dma_buff_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_RX_PAGE_SIZE, (u8 *)&page_sz);
-
-	if (page_sz == 0) {
-		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	offset = (u16)PageNum(rx_dma_buff_sz, page_sz);
-
-	cam_start_offset = offset * page_sz;
-
-	if (IS_HARDWARE_TYPE_8188E(adapter)) {
-		ctrl_l = 0x0001;
-		ctrl_h = 0x0001;
-	} else {
-		ctrl_l = 0x0f01;
-		ctrl_h = 0xf001;
-	}
-
-	/* Enable RX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, RXPKT_BUF_SELECT);
-
-	/* Write the WKFM CAM */
-	for (i = 0; i < WKFMCAM_ADDR_NUM; i++) {
-		/*
-		 * Set Rx packet buffer offset.
-		 * RxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
-		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
-		 * RxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
-		 * * Index: The index of the wake up frame mask
-		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
-		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
-		 */
-		rx_buf_ptr =
-			(cam_start_offset + idx * WKFMCAM_SIZE + i * 4) >> 3;
-		rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, rx_buf_ptr);
-
-		if (i == 0) {
-			if (context->type == PATTERN_VALID)
-				data = WOW_VALID_BIT;
-			else if (context->type == PATTERN_BROADCAST)
-				data = WOW_VALID_BIT | WOW_BC_BIT;
-			else if (context->type == PATTERN_MULTICAST)
-				data = WOW_VALID_BIT | WOW_MC_BIT;
-			else if (context->type == PATTERN_UNICAST)
-				data = WOW_VALID_BIT | WOW_UC_BIT;
-
-			if (context->crc != 0)
-				data |= context->crc;
-
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data);
-			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
-		} else if (i == 1) {
-			data = 0;
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data);
-			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_h);
-		} else if (i == 2 || i == 4) {
-			data = context->mask[i - 2];
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data);
-			/* write to RX packet buffer*/
-			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
-		} else if (i == 3 || i == 5) {
-			data = context->mask[i - 2];
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data);
-			/* write to RX packet buffer*/
-			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_h);
-		}
-
-		count = 0;
-		do {
-			tmp = rtw_read8(adapter, REG_RXPKTBUF_CTRL);
-			rtw_udelay_os(2);
-			count++;
-		} while (tmp && count < 100);
-
-		if (count >= 100)
-			res = _FALSE;
-		else
-			res = _TRUE;
-	}
-
-	/* Disable RX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
-		   DISABLE_TRXPKT_BUF_ACCESS);
-
-	return res;
-}
-void rtw_fill_pattern(_adapter *adapter)
-{
-	int i = 0, total = 0, index;
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	struct rtl_wow_pattern wow_pattern;
-
-	total = pwrpriv->wowlan_pattern_idx;
-
-	if (total > MAX_WKFM_CAM_NUM)
-		total = MAX_WKFM_CAM_NUM;
-
-	for (i = 0 ; i < total ; i++) {
-		if (_SUCCESS == rtw_hal_wow_pattern_generate(adapter, i, &wow_pattern)) {
-
-			index = i;
-			if (!pwrpriv->bInSuspend)
-				index += 2;
-			rtw_dump_wow_pattern(RTW_DBGDUMP, &wow_pattern, i);
-			if (rtw_write_to_frame_mask(adapter, index, &wow_pattern) == _FALSE)
-				RTW_INFO("%s: ERROR!! idx: %d write_to_frame_mask_cam fail\n", __func__, i);
-		}
-
-	}
-	rtw_write8(adapter, REG_WKFMCAM_NUM, total);
-
-}
-#else /* CONFIG_WOW_PATTERN_IN_TXFIFO */
-bool rtw_read_from_frame_mask(_adapter *adapter, u8 idx)
-{
-	u32 data_l = 0, data_h = 0, page_sz = 0;
-	u16 tx_page_start, tx_buf_ptr = 0;
-	u16 cam_start_offset = 0;
-	u16 ctrl_l = 0, ctrl_h = 0;
-	u8 count = 0, tmp = 0, last_entry = 0;
-	int i = 0;
-	bool res = _TRUE;
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	u32 buffer[WKFMCAM_ADDR_NUM];
-
-
-	if (idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("[Error]: %s, pattern index is out of range\n",
-			 __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_TX_PAGE_SIZE, (u8 *)&page_sz);
-	if (page_sz == 0) {
-		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_TX_BUFFER_LAST_ENTRY, (u8 *)&last_entry);
-	if (last_entry == 0) {
-		RTW_INFO("[Error]: %s, last entry of tx buffer is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-
-	if(_rtw_wow_chk_cap(adapter, WOW_CAP_HALMAC_ACCESS_PATTERN_IN_TXFIFO)) {
-		/* 8723F cannot indirect access tx fifo
-		 * rtw_halmac_dump_fifo(dvobj, fifo_sel, fifo_addr, buf_sz, buf)
-		 */
-		#ifdef RTW_HALMAC
-		rtw_halmac_dump_fifo(adapter_to_dvobj(adapter),
-		2,
-		(pwrctl->pattern_rsvd_page_loc * page_sz) + (idx * WKFMCAM_ADDR_NUM * 4),
-		WKFMCAM_ADDR_NUM*4, (u8*)buffer);
-		#endif
-
-		for (i = 0; i < (WKFMCAM_ADDR_NUM / 2); i++) {
-			RTW_INFO("[%d]: %08x %08x\n", i, *(buffer + i*2), *(buffer + i*2 + 1));
-		}
-	} else {
-		/* use the last 2 pages for wow pattern e.g. 0xfe and 0xff */
-		tx_page_start = last_entry - 1;
-		cam_start_offset = tx_page_start * page_sz / 8;
-		ctrl_l = 0x0;
-		ctrl_h = 0x0;
-
-		/* Enable TX packet buffer access */
-		rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, TXPKT_BUF_SELECT);
-
-		/* Read the WKFM CAM */
-		for (i = 0; i < (WKFMCAM_ADDR_NUM / 2); i++) {
-			/*
-			 * Set Tx packet buffer offset.
-			 * TxBufer pointer increases 1, we can access 8 bytes in Tx packet buffer.
-			 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
-			 * TxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
-			 * * Index: The index of the wake up frame mask
-			 * * WKFMCAM_SIZE: the total size of one WKFM CAM
-			 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
-			 */
-			tx_buf_ptr =
-				(cam_start_offset + idx * WKFMCAM_SIZE + i * 8) >> 3;
-			rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, tx_buf_ptr);
-			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
-			data_l = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_L);
-			data_h = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_H);
-
-			RTW_INFO("[%d]: %08x %08x\n", i, data_h, data_l);
-
-			count = 0;
-
-			do {
-				tmp = rtw_read32(adapter, REG_PKTBUF_DBG_CTRL) & BIT23;
-				rtw_udelay_os(2);
-				count++;
-			} while (!tmp && count < 100);
-
-			if (count >= 100) {
-				RTW_INFO("%s count:%d\n", __func__, count);
-				res = _FALSE;
-			}
-		}
-
-		/* Disable RX packet buffer access */
-		rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
-			   DISABLE_TRXPKT_BUF_ACCESS);
-	}
-
-	return res;
-}
-
-bool rtw_write_to_frame_mask(_adapter *adapter, u8 idx,
-			     struct  rtl_wow_pattern *context)
-{
-	u32 tx_page_start = 0, page_sz = 0;
-	u16 tx_buf_ptr = 0;
-	u16 cam_start_offset = 0;
-	u32 data_l = 0, data_h = 0;
-	u8 count = 0, tmp = 0, last_entry = 0;
-	int res = 0, i = 0;
-
-	if (idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("[Error]: %s, pattern index is out of range\n",
-			 __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_TX_PAGE_SIZE, (u8 *)&page_sz);
-	if (page_sz == 0) {
-		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_TX_BUFFER_LAST_ENTRY, (u8 *)&last_entry);
-	if (last_entry == 0) {
-		RTW_INFO("[Error]: %s, last entry of tx buffer is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	/* use the last 2 pages for wow pattern e.g. 0xfe and 0xff */
-	tx_page_start = last_entry - 1;
-	cam_start_offset = tx_page_start * page_sz / 8;
-
-	/* Write the PATTERN location to BIT_TXBUF_WKCAM_OFFSET */
-	rtw_write8(adapter, REG_TXBUF_WKCAM_OFFSET, cam_start_offset & 0xFF);
-	rtw_write8(adapter, REG_TXBUF_WKCAM_OFFSET + 1, (cam_start_offset >> 8) & 0xFF);
-	/* Enable TX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, TXPKT_BUF_SELECT);
-
-	/* Write the WKFM CAM */
-	for (i = 0; i < WKFMCAM_ADDR_NUM / 2; i++) {
-		/*
-		 * Set Tx packet buffer offset.
-		 * TxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
-		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
-		 * TxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
-		 * * Index: The index of the wake up frame mask
-		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
-		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
-		 */
-		tx_buf_ptr = cam_start_offset + ((idx * WKFMCAM_SIZE + i * 8) >> 3);
-
-		if (i == 0) {
-			if (context->type == PATTERN_VALID)
-				data_l = WOW_VALID_BIT;
-			else if (context->type == PATTERN_BROADCAST)
-				data_l = WOW_VALID_BIT | WOW_BC_BIT;
-			else if (context->type == PATTERN_MULTICAST)
-				data_l = WOW_VALID_BIT | WOW_MC_BIT;
-			else if (context->type == PATTERN_UNICAST)
-				data_l = WOW_VALID_BIT | WOW_UC_BIT;
-
-			if (context->crc != 0)
-				data_l |= context->crc;
-
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data_l);
-		} else {
-			data_l = context->mask[i * 2 - 2];
-			data_h = context->mask[i * 2 - 1];
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data_l);
-			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data_h);
-		}
-
-		rtw_write32(adapter, REG_PKTBUF_DBG_CTRL, (tx_buf_ptr & 0x1FFF) | BIT23 | (0xff <<24));
-		count = 0;
-		do {
-			tmp = rtw_read32(adapter, REG_PKTBUF_DBG_CTRL) & BIT23;
-			rtw_udelay_os(2);
-			count++;
-		} while (tmp && count < 100);
-
-		if (count >= 100) {
-			res = _FALSE;
-			RTW_INFO("%s write failed\n", __func__);
-		} else {
-			res = _TRUE;
-			RTW_INFO("%s write OK\n", __func__);
-		}
-	}
-
-	/* Disable TX packet buffer access */
-	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, DISABLE_TRXPKT_BUF_ACCESS);
-	return res;
-}
-bool rtw_write_to_frame_mask_buf(_adapter *adapter, u8 idx,
-			     struct  rtl_wow_pattern *context, char *pattern_info, u32 *ppattern_info_len)
-{
-
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	u32 page_sz = 0;
-	int res = _FALSE, i = 0;
-	u32 tmp_pattern_buf[6] = {0};
-
-	if (pattern_info == NULL) {
-		RTW_ERR("[Error]: %s, pattern info is NULL\n", __func__);
-	}
-	if (idx > MAX_WKFM_CAM_NUM) {
-		RTW_ERR("[Error]: %s, pattern index is out of range\n",
-			 __func__);
-		return _FALSE;
-	}
-
-	rtw_hal_get_def_var(adapter, HAL_DEF_TX_PAGE_SIZE, (u8 *)&page_sz);
-	if (page_sz == 0) {
-		RTW_ERR("[Error]: %s, page_sz is 0!!\n", __func__);
-		return _FALSE;
-	}
-
-	/* Fill WKFM */
-	for (i = 0; i < WKFMCAM_ADDR_NUM / 2; i++) {
-		if (i == 0) {
-			if (context->type == PATTERN_VALID)
-				tmp_pattern_buf[0] = WOW_VALID_BIT;
-			else if (context->type == PATTERN_BROADCAST)
-				tmp_pattern_buf[0] = WOW_VALID_BIT | WOW_BC_BIT;
-			else if (context->type == PATTERN_MULTICAST)
-				tmp_pattern_buf[0] = WOW_VALID_BIT | WOW_MC_BIT;
-			else if (context->type == PATTERN_UNICAST)
-				tmp_pattern_buf[0] = WOW_VALID_BIT | WOW_UC_BIT;
-
-			if (context->crc != 0)
-				tmp_pattern_buf[0] |= context->crc;
-			/* pattern[1] is reserved in pattern format, dont care. */
-
-		} else {
-			tmp_pattern_buf[i * 2] = context->mask[i * 2 - 2];
-			tmp_pattern_buf[i * 2 + 1] = context->mask[i * 2 - 1];
-		}
-	}
-
-
-	/* put pattern to pattern_buf */
-	_rtw_memcpy((pattern_info + idx * WKFMCAM_SIZE) , tmp_pattern_buf, WKFMCAM_SIZE);
-	*ppattern_info_len += WKFMCAM_SIZE;
-	#ifdef CONFIG_WOW_PATTERN_IN_TXFIFO_DBG
-	RTW_INFO("\nidx : %u pattern_info_len : %u\n", idx, *ppattern_info_len);
-	RTW_INFO_DUMP("", (pattern_info + idx * WKFMCAM_SIZE), WKFMCAM_SIZE);
-	#endif
-	res = _TRUE;
-
-
-	return res;
-}
-#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO */
-
-void rtw_clean_pattern(_adapter *adapter)
-{
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	struct rtl_wow_pattern zero_pattern;
-	int i = 0;
-
-	_rtw_memset(&zero_pattern, 0, sizeof(struct rtl_wow_pattern));
-
-	zero_pattern.type = PATTERN_INVALID;
-	/* pattern in tx fifo do not need clear to zero*/
-
-	rtw_write8(adapter, REG_WKFMCAM_NUM, 0);
-}
-#if 0
-static int rtw_hal_set_pattern(_adapter *adapter, u8 *pattern,
-			       u8 len, u8 *mask, u8 idx)
-{
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	struct mlme_ext_priv *pmlmeext = NULL;
-	struct mlme_ext_info *pmlmeinfo = NULL;
-	struct rtl_wow_pattern wow_pattern;
-	u8 mask_hw[MAX_WKFM_SIZE] = {0};
-	u8 content[MAX_WKFM_PATTERN_SIZE] = {0};
-	u8 broadcast_addr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-	u8 multicast_addr1[2] = {0x33, 0x33};
-	u8 multicast_addr2[3] = {0x01, 0x00, 0x5e};
-	u8 res = _FALSE, index = 0, mask_len = 0;
-	u8 mac_addr[ETH_ALEN] = {0};
-	u16 count = 0;
-	int i, j;
-
-	if (pwrctl->wowlan_pattern_idx > MAX_WKFM_CAM_NUM) {
-		RTW_INFO("%s pattern_idx is more than MAX_FMC_NUM: %d\n",
-			 __func__, MAX_WKFM_CAM_NUM);
-		return _FALSE;
-	}
-
-	pmlmeext = &adapter->mlmeextpriv;
-	pmlmeinfo = &pmlmeext->mlmext_info;
-	_rtw_memcpy(mac_addr, adapter_mac_addr(adapter), ETH_ALEN);
-	_rtw_memset(&wow_pattern, 0, sizeof(struct rtl_wow_pattern));
-
-	mask_len = DIV_ROUND_UP(len, 8);
-
-	/* 1. setup A1 table */
-	if (memcmp(pattern, broadcast_addr, ETH_ALEN) == 0)
-		wow_pattern.type = PATTERN_BROADCAST;
-	else if (memcmp(pattern, multicast_addr1, 2) == 0)
-		wow_pattern.type = PATTERN_MULTICAST;
-	else if (memcmp(pattern, multicast_addr2, 3) == 0)
-		wow_pattern.type = PATTERN_MULTICAST;
-	else if (memcmp(pattern, mac_addr, ETH_ALEN) == 0)
-		wow_pattern.type = PATTERN_UNICAST;
-	else
-		wow_pattern.type = PATTERN_INVALID;
-
-	/* translate mask from os to mask for hw */
-
-/******************************************************************************
- * pattern from OS uses 'ethenet frame', like this:
-
-	|    6   |    6   |   2  |     20    |  Variable  |  4  |
-	|--------+--------+------+-----------+------------+-----|
-	|    802.3 Mac Header    | IP Header | TCP Packet | FCS |
-	|   DA   |   SA   | Type |
-
- * BUT, packet catched by our HW is in '802.11 frame', begin from LLC,
-
-	|     24 or 30      |    6   |   2  |     20    |  Variable  |  4  |
-	|-------------------+--------+------+-----------+------------+-----|
-	| 802.11 MAC Header |       LLC     | IP Header | TCP Packet | FCS |
-			    | Others | Tpye |
-
- * Therefore, we need translate mask_from_OS to mask_to_hw.
- * We should left-shift mask by 6 bits, then set the new bit[0~5] = 0,
- * because new mask[0~5] means 'SA', but our HW packet begins from LLC,
- * bit[0~5] corresponds to first 6 Bytes in LLC, they just don't match.
- ******************************************************************************/
-	/* Shift 6 bits */
-	for (i = 0; i < mask_len - 1; i++) {
-		mask_hw[i] = mask[i] >> 6;
-		mask_hw[i] |= (mask[i + 1] & 0x3F) << 2;
-	}
-
-	mask_hw[i] = (mask[i] >> 6) & 0x3F;
-	/* Set bit 0-5 to zero */
-	mask_hw[0] &= 0xC0;
-
-	for (i = 0; i < (MAX_WKFM_SIZE / 4); i++) {
-		wow_pattern.mask[i] = mask_hw[i * 4];
-		wow_pattern.mask[i] |= (mask_hw[i * 4 + 1] << 8);
-		wow_pattern.mask[i] |= (mask_hw[i * 4 + 2] << 16);
-		wow_pattern.mask[i] |= (mask_hw[i * 4 + 3] << 24);
-	}
-
-	/* To get the wake up pattern from the mask.
-	 * We do not count first 12 bits which means
-	 * DA[6] and SA[6] in the pattern to match HW design. */
-	count = 0;
-	for (i = 12; i < len; i++) {
-		if ((mask[i / 8] >> (i % 8)) & 0x01) {
-			content[count] = pattern[i];
-			count++;
-		}
-	}
-
-	wow_pattern.crc = rtw_calc_crc(content, count);
-
-	if (wow_pattern.crc != 0) {
-		if (wow_pattern.type == PATTERN_INVALID)
-			wow_pattern.type = PATTERN_VALID;
-	}
-
-	index = idx;
-
-	if (!pwrctl->bInSuspend)
-		index += 2;
-
-	/* write pattern */
-	res = rtw_write_to_frame_mask(adapter, index, &wow_pattern);
-
-	if (res == _FALSE)
-		RTW_INFO("%s: ERROR!! idx: %d write_to_frame_mask_cam fail\n",
-			 __func__, idx);
-
-	return res;
-}
-#endif
-#else /*CONFIG_WOW_PATTERN_HW_CAM*/
-
-#define WOW_CAM_ACCESS_TIMEOUT_MS	200
-static u32 _rtw_wow_pattern_read_cam(_adapter *adapter, u8 addr)
-{
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
-
-	u32 rdata = 0;
-	u32 cnt = 0;
-	systime start = 0;
-	u8 timeout = 0;
-	u8 rst = _FALSE;
-
-	_enter_critical_mutex(mutex, NULL);
-
-	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_ADDR_V2(addr));
-
-	start = rtw_get_current_time();
-	while (1) {
-		if (rtw_is_surprise_removed(adapter))
-			break;
-
-		cnt++;
-		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1)) {
-			rst = _SUCCESS;
-			break;
-		}
-		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
-			timeout = 1;
-			break;
-		}
-	}
-
-	rdata = rtw_read32(adapter, REG_WKFMCAM_RWD);
-
-	_exit_critical_mutex(mutex, NULL);
-
-	/*RTW_INFO("%s ==> addr:0x%02x , rdata:0x%08x\n", __func__, addr, rdata);*/
-
-	if (timeout)
-		RTW_ERR(FUNC_ADPT_FMT" failed due to polling timeout\n", FUNC_ADPT_ARG(adapter));
-
-	return rdata;
-}
-void rtw_wow_pattern_read_cam_ent(_adapter *adapter, u8 id, struct  rtl_wow_pattern *context)
-{
-	int i;
-	u32 rdata;
-
-	_rtw_memset(context, 0, sizeof(struct  rtl_wow_pattern));
-
-	for (i = 4; i >= 0; i--) {
-		rdata = _rtw_wow_pattern_read_cam(adapter, (id << 3) | i);
-
-		switch (i) {
-		case 4:
-			if (rdata & WOW_BC_BIT)
-				context->type = PATTERN_BROADCAST;
-			else if (rdata & WOW_MC_BIT)
-				context->type = PATTERN_MULTICAST;
-			else if (rdata & WOW_UC_BIT)
-				context->type = PATTERN_UNICAST;
-			else
-				context->type = PATTERN_INVALID;
-
-			context->crc = rdata & 0xFFFF;
-			break;
-		default:
-			_rtw_memcpy(&context->mask[i], (u8 *)(&rdata), 4);
-			break;
-		}
-	}
-}
-
-static void _rtw_wow_pattern_write_cam(_adapter *adapter, u8 addr, u32 wdata)
-{
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
-	u32 cnt = 0;
-	systime start = 0, end = 0;
-	u8 timeout = 0;
-
-	/*RTW_INFO("%s ==> addr:0x%02x , wdata:0x%08x\n", __func__, addr, wdata);*/
-	_enter_critical_mutex(mutex, NULL);
-
-	rtw_write32(adapter, REG_WKFMCAM_RWD, wdata);
-	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_WE | BIT_WKFCAM_ADDR_V2(addr));
-
-	start = rtw_get_current_time();
-	while (1) {
-		if (rtw_is_surprise_removed(adapter))
-			break;
-
-		cnt++;
-		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1))
-			break;
-
-		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
-			timeout = 1;
-			break;
-		}
-	}
-	end = rtw_get_current_time();
-
-	_exit_critical_mutex(mutex, NULL);
-
-	if (timeout) {
-		RTW_ERR(FUNC_ADPT_FMT" addr:0x%02x, wdata:0x%08x, to:%u, polling:%u, %d ms\n"
-			, FUNC_ADPT_ARG(adapter), addr, wdata, timeout, cnt, rtw_get_time_interval_ms(start, end));
-	}
-}
-
-void rtw_wow_pattern_write_cam_ent(_adapter *adapter, u8 id, struct  rtl_wow_pattern *context)
-{
-	int j;
-	u8 addr;
-	u32 wdata = 0;
-
-	for (j = 4; j >= 0; j--) {
-		switch (j) {
-		case 4:
-			wdata = context->crc;
-
-			if (PATTERN_BROADCAST == context->type)
-				wdata |= WOW_BC_BIT;
-			if (PATTERN_MULTICAST == context->type)
-				wdata |= WOW_MC_BIT;
-			if (PATTERN_UNICAST == context->type)
-				wdata |= WOW_UC_BIT;
-			if (PATTERN_INVALID != context->type)
-				wdata |= WOW_VALID_BIT;
-			break;
-		default:
-			wdata = context->mask[j];
-			break;
-		}
-
-		addr = (id << 3) + j;
-
-		_rtw_wow_pattern_write_cam(adapter, addr, wdata);
-	}
-}
-
-static u8 _rtw_wow_pattern_clean_cam(_adapter *adapter)
-{
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
-	u32 cnt = 0;
-	systime start = 0;
-	u8 timeout = 0;
-	u8 rst = _FAIL;
-
-	_enter_critical_mutex(mutex, NULL);
-	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_CLR_V1);
-
-	start = rtw_get_current_time();
-	while (1) {
-		if (rtw_is_surprise_removed(adapter))
-			break;
-
-		cnt++;
-		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1)) {
-			rst = _SUCCESS;
-			break;
-		}
-		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
-			timeout = 1;
-			break;
-		}
-	}
-	_exit_critical_mutex(mutex, NULL);
-
-	if (timeout)
-		RTW_ERR(FUNC_ADPT_FMT" falied ,polling timeout\n", FUNC_ADPT_ARG(adapter));
-
-	return rst;
-}
-
-void rtw_clean_pattern(_adapter *adapter)
-{
-	if (_FAIL == _rtw_wow_pattern_clean_cam(adapter))
-		RTW_ERR("rtw_clean_pattern failed\n");
-}
-void rtw_fill_pattern(_adapter *adapter)
-{
-	int i = 0, total = 0;
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	struct rtl_wow_pattern wow_pattern;
-
-	total = pwrpriv->wowlan_pattern_idx;
-
-	if (total > MAX_WKFM_CAM_NUM)
-		total = MAX_WKFM_CAM_NUM;
-
-	for (i = 0 ; i < total ; i++) {
-		if (_SUCCESS == rtw_hal_wow_pattern_generate(adapter, i, &wow_pattern)) {
-			rtw_dump_wow_pattern(RTW_DBGDUMP, &wow_pattern, i);
-			rtw_wow_pattern_write_cam_ent(adapter, i, &wow_pattern);
-		}
-	}
-}
-
-#endif
-void rtw_wow_pattern_cam_dump(_adapter *adapter)
-{
-
-#ifndef CONFIG_WOW_PATTERN_HW_CAM
-	int i = 0, total = 0;
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-	total = pwrpriv->wowlan_pattern_idx;
-
-	if (total > MAX_WKFM_CAM_NUM)
-		total = MAX_WKFM_CAM_NUM;
-
-	for (i = 0 ; i < total; i++) {
-		RTW_INFO("=======[%d]=======\n", i);
-		rtw_read_from_frame_mask(adapter, i);
-	}
-#else
-	struct  rtl_wow_pattern context;
-	int i;
-
-	for (i = 0 ; i < MAX_WKFM_CAM_NUM; i++) {
-		rtw_wow_pattern_read_cam_ent(adapter, i, &context);
-		rtw_dump_wow_pattern(RTW_DBGDUMP, &context, i);
-	}
-
-#endif
-}
-
-
-static void rtw_hal_dl_pattern(_adapter *adapter, u8 mode)
-{
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-
-	switch (mode) {
-	case 0:
-		rtw_clean_pattern(adapter);
-		RTW_INFO("%s: total patterns: %d\n", __func__, pwrpriv->wowlan_pattern_idx);
-		break;
-	case 1:
-		#if defined(CONFIG_WOW_PATTERN_IN_TXFIFO)
-		RTW_INFO("%s Patterns have been downloaded in rsvd pages\n", __func__);
-		#else
-		rtw_set_default_pattern(adapter);
-		rtw_fill_pattern(adapter);
-		RTW_INFO("%s: pattern total: %d downloaded\n", __func__, pwrpriv->wowlan_pattern_idx);
-		#endif
-		break;
-	case 2:
-		rtw_clean_pattern(adapter);
-		rtw_wow_pattern_sw_reset(adapter);
-		RTW_INFO("%s: clean patterns\n", __func__);
-		break;
-	default:
-		RTW_INFO("%s: unknown mode\n", __func__);
-		break;
-	}
-}
-
-static void rtw_hal_wow_enable(_adapter *adapter)
-{
-	struct registry_priv  *registry_par = &adapter->registrypriv;
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	struct security_priv *psecuritypriv = &adapter->securitypriv;
-	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
-	struct sta_info *psta = NULL;
-	PHAL_DATA_TYPE pHalData = GET_HAL_DATA(adapter);
-	int res;
-	u16 media_status_rpt;
-	u8 no_wake = 0, i;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	_adapter *iface;
-#ifdef CONFIG_GPIO_WAKEUP
-	u8 val8 = 0;
-#endif
-
-#ifdef CONFIG_LPS_PG
-	u8 lps_pg_hdl_id = 0;
-#endif
-
-
-
-	if(registry_par->suspend_type == FW_IPS_DISABLE_BBRF &&
-	!check_fwstate(pmlmepriv, WIFI_ASOC_STATE))
-		no_wake = 1;
-
-	RTW_PRINT(FUNC_ADPT_FMT " WOWLAN_ENABLE\n", FUNC_ADPT_ARG(adapter));
-	rtw_hal_gate_bb(adapter, _TRUE);
-
-	for (i = 0; i < dvobj->iface_nums; i++) {
-		iface = dvobj->padapters[i];
-		/* Start Usb TxDMA */
-		if(iface) {
-			RTW_INFO(ADPT_FMT "enable TX\n", ADPT_ARG(iface));
-			RTW_ENABLE_FUNC(iface, DF_TX_BIT);
-		}
-	}
-
-#ifdef CONFIG_GTK_OL
-	if (psecuritypriv->binstallKCK_KEK == _TRUE)
-		rtw_hal_fw_sync_cam_id(adapter);
-#endif
-	if (IS_HARDWARE_TYPE_8723B(adapter))
-		rtw_hal_backup_rate(adapter);
-
-	rtw_hal_fw_dl(adapter, _TRUE);
-	if(no_wake)
-		media_status_rpt = RT_MEDIA_DISCONNECT;
-	else
-		media_status_rpt = RT_MEDIA_CONNECT;
-	rtw_hal_set_hwreg(adapter, HW_VAR_H2C_FW_JOINBSSRPT,
-			  (u8 *)&media_status_rpt);
-
-	/* RX DMA stop */
-	#if defined(CONFIG_RTL8188E)
-	if (IS_HARDWARE_TYPE_8188E(adapter))
-		rtw_hal_disable_tx_report(adapter);
-	#endif
-
-	res = rtw_hal_pause_rx_dma(adapter);
-	if (res == _FAIL)
-		RTW_PRINT("[WARNING] pause RX DMA fail\n");
-
-	#ifndef CONFIG_WOW_PATTERN_HW_CAM
-	/* Reconfig RX_FF Boundary */
-	#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
-	rtw_hal_set_wow_rxff_boundary(adapter, _TRUE);
-	#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
-	#endif
-
-	/* redownload wow pattern */
-	if(!no_wake)
-		rtw_hal_dl_pattern(adapter, 1);
-
-	if (!pwrctl->wowlan_pno_enable) {
-		psta = rtw_get_stainfo(&adapter->stapriv, get_bssid(pmlmepriv));
-
-		if (psta != NULL) {
-			#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
-			adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
-			adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
-			rtw_hal_set_default_port_id_cmd(adapter, psta->cmn.mac_id);
-			#endif
-			if(!no_wake)
-				rtw_sta_media_status_rpt(adapter, psta, 1);
-		}
-#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
-		else {
-			if(registry_par->suspend_type == FW_IPS_WRC) {
-				adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
-				adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
-				rtw_hal_set_default_port_id_cmd(adapter, 0);
-			}
-		}
-#endif /* CONFIG_FW_MULTI_PORT_SUPPORT */
-	}
-
-#if defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)
-	/* Enable CPWM2 only. */
-	res = rtw_hal_enable_cpwm2(adapter);
-	if (res == _FAIL)
-		RTW_PRINT("[WARNING] enable cpwm2 fail\n");
-#endif
-#ifdef CONFIG_GPIO_WAKEUP
-#ifdef CONFIG_RTW_ONE_PIN_GPIO
-	rtw_hal_switch_gpio_wl_ctrl(adapter, pwrctl->wowlan_gpio_index, _TRUE);
-	rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
-#else
-#ifdef CONFIG_WAKEUP_GPIO_INPUT_MODE
-	if (pwrctl->is_high_active == 0)
-		rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
-	else
-		rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index,
-			GPIO_OUTPUT_LOW);
-#else
-	val8 = (pwrctl->is_high_active == 0) ? 1 : 0;
-	rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index, val8);
-	rtw_hal_switch_gpio_wl_ctrl(adapter, pwrctl->wowlan_gpio_index, _TRUE);
-	RTW_INFO("%s: set GPIO_%d to OUTPUT %s state in wow suspend and %s_ACTIVE.\n",
-		 __func__, pwrctl->wowlan_gpio_index,
-		 pwrctl->wowlan_gpio_output_state ? "HIGH" : "LOW",
-		 pwrctl->is_high_active ? "HIGI" : "LOW");
-#endif /* CONFIG_WAKEUP_GPIO_INPUT_MODE */
-#endif /* CONFIG_RTW_ONE_PIN_GPIO */
-#endif /* CONFIG_GPIO_WAKEUP */
-	/* Set WOWLAN H2C command. */
-	RTW_PRINT("Set WOWLan cmd\n");
-	rtw_hal_set_fw_wow_related_cmd(adapter, 1);
-
-	res = rtw_hal_check_wow_ctrl(adapter, _TRUE);
-
-	if (res == _FALSE)
-		RTW_INFO("[Error]%s: set wowlan CMD fail!!\n", __func__);
-
-	pwrctl->wowlan_wake_reason =
-		rtw_read8(adapter, REG_WOWLAN_WAKE_REASON);
-
-	RTW_PRINT("wowlan_wake_reason: 0x%02x\n",
-		  pwrctl->wowlan_wake_reason);
-#ifdef CONFIG_GTK_OL_DBG
-	dump_sec_cam(RTW_DBGDUMP, adapter);
-	dump_sec_cam_cache(RTW_DBGDUMP, adapter);
-#endif
-
-#ifdef CONFIG_LPS_PG
-	if (pwrctl->lps_level == LPS_PG) {
-		lps_pg_hdl_id = LPS_PG_INFO_CFG;
-		rtw_hal_set_hwreg(adapter, HW_VAR_LPS_PG_HANDLE, (u8 *)(&lps_pg_hdl_id));
-	}
-#endif
-
-#ifdef CONFIG_USB_HCI
-	/* free adapter's resource */
-	rtw_mi_intf_stop(adapter);
-
-#endif
-#if defined(CONFIG_USB_HCI) || defined(CONFIG_PCI_HCI)
-	/* Invoid SE0 reset signal during suspending*/
-	rtw_write8(adapter, REG_RSV_CTRL, 0x20);
-	if (IS_8188F(pHalData->version_id) == FALSE
-		&& IS_8188GTV(pHalData->version_id) == FALSE)
-		rtw_write8(adapter, REG_RSV_CTRL, 0x60);
-#endif
-
-	rtw_hal_gate_bb(adapter, _FALSE);
-}
-
-#define DBG_WAKEUP_REASON
-#ifdef DBG_WAKEUP_REASON
-void _dbg_wake_up_reason_string(_adapter *adapter, const char *srt_res)
-{
-	RTW_INFO(ADPT_FMT "- wake up reason - %s\n", ADPT_ARG(adapter), srt_res);
-}
-void _dbg_rtw_wake_up_reason(_adapter *adapter, u8 reason)
-{
-	if (RX_PAIRWISEKEY == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx pairwise key");
-	else if (RX_GTK == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx GTK");
-	else if (RX_FOURWAY_HANDSHAKE == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx four way handshake");
-	else if (RX_DISASSOC == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx disassoc");
-	else if (RX_DEAUTH == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx deauth");
-	else if (RX_ARP_REQUEST == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx ARP request");
-	else if (FW_DECISION_DISCONNECT == reason)
-		_dbg_wake_up_reason_string(adapter, "FW detect disconnect");
-	else if (RX_MAGIC_PKT == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx magic packet");
-	else if (RX_UNICAST_PKT == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx unicast packet");
-	else if (RX_PATTERN_PKT == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx pattern packet");
-	else if (RTD3_SSID_MATCH == reason)
-		_dbg_wake_up_reason_string(adapter, "RTD3 SSID match");
-	else if (RX_REALWOW_V2_WAKEUP_PKT == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx real WOW V2 wakeup packet");
-	else if (RX_REALWOW_V2_ACK_LOST == reason)
-		_dbg_wake_up_reason_string(adapter, "Rx real WOW V2 ack lost");
-	else if (ENABLE_FAIL_DMA_IDLE == reason)
-		_dbg_wake_up_reason_string(adapter, "enable fail DMA idle");
-	else if (ENABLE_FAIL_DMA_PAUSE == reason)
-		_dbg_wake_up_reason_string(adapter, "enable fail DMA pause");
-	else if (AP_OFFLOAD_WAKEUP == reason)
-		_dbg_wake_up_reason_string(adapter, "AP offload wakeup");
-	else if (CLK_32K_UNLOCK == reason)
-		_dbg_wake_up_reason_string(adapter, "clk 32k unlock");
-	else if (RTIME_FAIL_DMA_IDLE == reason)
-		_dbg_wake_up_reason_string(adapter, "RTIME fail DMA idle");
-	else if (CLK_32K_LOCK == reason)
-		_dbg_wake_up_reason_string(adapter, "clk 32k lock");
-	#ifdef CONFIG_WOW_KEEP_ALIVE_PATTERN
-	else if (WOW_KEEPALIVE_ACK_TIMEOUT == reason)
-		_dbg_wake_up_reason_string(adapter, "rx keep alive ack timeout");
-	else if (WOW_KEEPALIVE_WAKE == reason)
-		_dbg_wake_up_reason_string(adapter, "rx keep alive wake pattern");
-	#endif /*CONFIG_WOW_KEEP_ALIVE_PATTERN*/
-	else
-		_dbg_wake_up_reason_string(adapter, "unknown reasoen");
-}
-#endif
-
-static void rtw_hal_wow_disable(_adapter *adapter)
-{
-	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	struct security_priv *psecuritypriv = &adapter->securitypriv;
-	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
-	struct sta_info *psta = NULL;
-	struct registry_priv  *registry_par = &adapter->registrypriv;
-	int res;
-	u16 media_status_rpt;
-
-	RTW_PRINT("%s, WOWLAN_DISABLE\n", __func__);
-
-	if(registry_par->suspend_type == FW_IPS_DISABLE_BBRF && !check_fwstate(pmlmepriv, WIFI_ASOC_STATE)) {
-		RTW_INFO("FW_IPS_DISABLE_BBRF resume\n");
-		return;
-	}
-
-	if (!pwrctl->wowlan_pno_enable) {
-		psta = rtw_get_stainfo(&adapter->stapriv, get_bssid(pmlmepriv));
-		if (psta != NULL)
-			rtw_sta_media_status_rpt(adapter, psta, 0);
-		else
-			RTW_INFO("%s: psta is null\n", __func__);
-	}
-
-	if (0) {
-		RTW_INFO("0x630:0x%02x\n", rtw_read8(adapter, 0x630));
-		RTW_INFO("0x631:0x%02x\n", rtw_read8(adapter, 0x631));
-		RTW_INFO("0x634:0x%02x\n", rtw_read8(adapter, 0x634));
-		RTW_INFO("0x1c7:0x%02x\n", rtw_read8(adapter, 0x1c7));
-	}
-
-	pwrctl->wowlan_wake_reason = rtw_read8(adapter, REG_WOWLAN_WAKE_REASON);
-
-	RTW_PRINT("wakeup_reason: 0x%02x\n",
-		  pwrctl->wowlan_wake_reason);
-	#ifdef DBG_WAKEUP_REASON
-	_dbg_rtw_wake_up_reason(adapter, pwrctl->wowlan_wake_reason);
-	#endif
-
-	rtw_hal_set_fw_wow_related_cmd(adapter, 0);
-
-	res = rtw_hal_check_wow_ctrl(adapter, _FALSE);
-
-	#if defined(CONFIG_RTL8188E)
-	if (IS_HARDWARE_TYPE_8188E(adapter))
-		rtw_hal_enable_tx_report(adapter);
-	#endif
-
-	if ((pwrctl->wowlan_wake_reason != RX_DISASSOC) &&
-		(pwrctl->wowlan_wake_reason != RX_DEAUTH) &&
-		(pwrctl->wowlan_wake_reason != FW_DECISION_DISCONNECT)) {
-		rtw_hal_get_aoac_rpt(adapter);
-		rtw_hal_update_sw_security_info(adapter);
-	}
-
-	if (res == _FALSE) {
-		RTW_INFO("[Error]%s: disable WOW cmd fail\n!!", __func__);
-		rtw_hal_force_enable_rxdma(adapter);
-	}
-
-	rtw_hal_gate_bb(adapter, _TRUE);
-
-	res = rtw_hal_pause_rx_dma(adapter);
-	if (res == _FAIL)
-		RTW_PRINT("[WARNING] pause RX DMA fail\n");
-
-	/* clean HW pattern match */
-	rtw_hal_dl_pattern(adapter, 0);
-
-	#ifndef CONFIG_WOW_PATTERN_HW_CAM
-	/* config RXFF boundary to original */
-	#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
-	rtw_hal_set_wow_rxff_boundary(adapter, _FALSE);
-	#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
-	#endif
-	rtw_hal_release_rx_dma(adapter);
-
-	rtw_hal_fw_dl(adapter, _FALSE);
-
-#ifdef CONFIG_GPIO_WAKEUP
-
-#ifdef CONFIG_RTW_ONE_PIN_GPIO
-	rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
-#else
-#ifdef CONFIG_WAKEUP_GPIO_INPUT_MODE
-	if (pwrctl->is_high_active == 0)
-		rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
-	else
-		rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index,
-			GPIO_OUTPUT_LOW);
-#else
-	rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index
-		, pwrctl->wowlan_gpio_output_state);
-	RTW_INFO("%s: set GPIO_%d to OUTPUT %s state in wow resume and %s_ACTIVE.\n",
-		 __func__, pwrctl->wowlan_gpio_index,
-		 pwrctl->wowlan_gpio_output_state ? "HIGH" : "LOW",
-		 pwrctl->is_high_active ? "HIGI" : "LOW");
-#endif /* CONFIG_WAKEUP_GPIO_INPUT_MODE */
-#endif /* CONFIG_RTW_ONE_PIN_GPIO */
-#endif /* CONFIG_GPIO_WAKEUP */
-	if ((pwrctl->wowlan_wake_reason != FW_DECISION_DISCONNECT) &&
-	    (pwrctl->wowlan_wake_reason != RX_PAIRWISEKEY) &&
-	    (pwrctl->wowlan_wake_reason != RX_DISASSOC) &&
-	    (pwrctl->wowlan_wake_reason != RX_DEAUTH)) {
-
-		media_status_rpt = RT_MEDIA_CONNECT;
-		rtw_hal_set_hwreg(adapter, HW_VAR_H2C_FW_JOINBSSRPT,
-				  (u8 *)&media_status_rpt);
-
-		if (psta != NULL) {
-			#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
-			adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
-			adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
-			rtw_hal_set_default_port_id_cmd(adapter, psta->cmn.mac_id);
-			#endif
-			rtw_sta_media_status_rpt(adapter, psta, 1);
-		}
-	}
-	rtw_hal_gate_bb(adapter, _FALSE);
-}
-#if defined(CONFIG_WOW_PATTERN_IN_TXFIFO)
-static void rtw_hal_construct_pattern_info(
-	PADAPTER	padapter,
-	u8		*pframe,
-	u32		*pLength
-)
-{
-
-	u32 pattern_info_len = 0;
-	int i = 0, total = 0, index;
-	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(padapter);
-	struct rtl_wow_pattern wow_pattern;
-	u32 page_sz = 0;
-
-	total = pwrpriv->wowlan_pattern_idx;
-
-	if (total > MAX_WKFM_CAM_NUM)
-		total = MAX_WKFM_CAM_NUM;
-
-	/* Generate default pattern */
-	rtw_set_default_pattern(padapter);
-
-	/* Convert pattern to WKFM_CAM pattern */
-	for (i = 0 ; i < total ; i++) {
-		if (_SUCCESS == rtw_hal_wow_pattern_generate(padapter, i, &wow_pattern)) {
-
-			index = i;
-			if (!pwrpriv->bInSuspend)
-				index += 2;
-			#ifdef CONFIG_WOW_PATTERN_IN_TXFIFO_DBG
-			rtw_dump_wow_pattern(RTW_DBGDUMP, &wow_pattern, i);
-			#endif
-
-			if (rtw_write_to_frame_mask_buf(padapter, index, &wow_pattern,
-				pframe, &pattern_info_len) == _FALSE)
-				RTW_INFO("%s: ERROR!! idx: %d write_to_frame_mask_cam fail\n", __func__, i);
-		}
-	}
-	*pLength = pattern_info_len;
-
-
-}
-#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO */
 void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		  u8 tx_desc, u32 page_size, u8 *page_num, u32 *total_pkt_len,
 				  RSVDPAGE_LOC *rsvd_page_loc)
@@ -10745,11 +9298,6 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 	int pno_index;
 	u8 ssid_num;
 #endif /* CONFIG_PNO_SUPPORT */
-#ifdef CONFIG_WOW_PATTERN_IN_TXFIFO
-	u32 PatternLen = 0;
-	u32 cam_start_offset = 0;
-	u32 reg_cam_start_offset_val = 0;
-#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO */
 
 	pmlmeext = &adapter->mlmeextpriv;
 	pmlmeinfo = &pmlmeext->mlmext_info;
@@ -10765,7 +9313,7 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		if ((0 != pwrctl->wowlan_war_offload_ipv4.ip_addr[0]) &&
 			(_FALSE == _rtw_memcmp(&pwrctl->wowlan_war_offload_ipv4.ip_addr[0], pmlmeinfo->ip_addr, 4))) {
 			_rtw_memcpy(pmlmeinfo->ip_addr, &pwrctl->wowlan_war_offload_ipv4.ip_addr[0], 4);
-			RTW_INFO("Update IP(%d.%d.%d.%d) to arp rsvd page\n",
+			RTW_INFO("Update IP(%d.%d.%d.%d) to arp rsvd page\n", 
 			pmlmeinfo->ip_addr[0], pmlmeinfo->ip_addr[1],
 			pmlmeinfo->ip_addr[2], pmlmeinfo->ip_addr[3]);
 		}
@@ -11220,42 +9768,11 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 			*(pframe+tmp_idx+26-tx_desc) = rsvd_page_loc->LocMdnsv4;
 			*(pframe+tmp_idx+27-tx_desc) = rsvd_page_loc->LocMdnsv6;
 #endif /* defined(CONFIG_OFFLOAD_MDNS_V4) || defined(CONFIG_OFFLOAD_MDNS_V6) */
-
+	
 			}
 			//rtw_dump_rsvd_page(RTW_DBGDUMP, adapter, rsvd_page_loc->LocIpParm, 46);
 #endif /* CONFIG_WAR_OFFLOAD */
 
-#if defined(CONFIG_WOW_PATTERN_IN_TXFIFO)
-		/* pattern_rsvd_page_loc will be used by rtw_read_from_frame_mask() */
-		pwrctl->pattern_rsvd_page_loc = *page_num;
-		RTW_INFO("LocPatternInfo: %d\n", pwrctl->pattern_rsvd_page_loc);
-		rtw_hal_construct_pattern_info(adapter,
-								&pframe[index - tx_desc],
-								&PatternLen);
-
-		/* Set cam_start_offset to REG_TXBUF_WKCAM_OFFSET
-		 * Cam address(TxBufer pointer) access 8 bytes at a time
-		 */
-
-		// Get rsvd page start page number + pattern located page
-		cam_start_offset = rtw_read8(adapter, REG_BCNQ_BDNY) + *page_num;
-		cam_start_offset *= page_size;
-		cam_start_offset /= 8;
-
-		reg_cam_start_offset_val = rtw_read32(adapter, REG_TXBUF_WKCAM_OFFSET);
-		reg_cam_start_offset_val &= ~(WKCAM_OFFSET_BIT_MASK << WKCAM_OFFSET_BIT_MASK_OFFSET);
-		reg_cam_start_offset_val |= (cam_start_offset << WKCAM_OFFSET_BIT_MASK_OFFSET);
-		rtw_write32(adapter, REG_TXBUF_WKCAM_OFFSET, reg_cam_start_offset_val);
-
-		/* Set pattern number to REG_WKFMCAM_NUM */
-		rtw_write8(adapter, REG_WKFMCAM_NUM, PatternLen / WKFMCAM_SIZE);
-
-		CurtPktPageNum = (u8)PageNum(PatternLen, page_size);
-		*page_num += CurtPktPageNum;
-		index += (CurtPktPageNum * page_size);
-		RSVD_PAGE_CFG("WOW-PatternInfo", CurtPktPageNum, *page_num, index);
-
-#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO */
 
 		/*Reserve 1 page for AOAC report*/
 		rsvd_page_loc->LocAOACReport = *page_num;
@@ -11263,8 +9780,6 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		*page_num += 1;
 		*total_pkt_len = index + (page_size * 1);
 		RSVD_PAGE_CFG("WOW-AOAC", 1, *page_num, *total_pkt_len);
-
-
 	} else {
 #ifdef CONFIG_PNO_SUPPORT
 		if (pwrctl->wowlan_in_resume == _FALSE &&
@@ -11347,6 +9862,1346 @@ void rtw_hal_set_wow_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 index,
 		}
 #endif /* CONFIG_PNO_SUPPORT */
 	}
+}
+
+static void rtw_hal_gate_bb(_adapter *adapter, bool stop)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	u8 i = 0, val8 = 0, empty = _FAIL;
+
+	if (stop) {
+		/* checking TX queue status */
+		for (i = 0 ; i < 5 ; i++) {
+			rtw_hal_get_hwreg(adapter, HW_VAR_CHK_MGQ_CPU_EMPTY, &empty);
+			if (empty) {
+				break;
+			} else {
+				RTW_WARN("%s: MGQ_CPU is busy(%d)!\n",
+					 __func__, i);
+				rtw_mdelay_os(10);
+			}
+		}
+
+		if (val8 == 5)
+			RTW_ERR("%s: Polling MGQ_CPU empty fail!\n", __func__);
+
+		/* Pause TX*/
+		pwrpriv->wowlan_txpause_status = rtw_read8(adapter, REG_TXPAUSE);
+		rtw_write8(adapter, REG_TXPAUSE, 0xff);
+		val8 = rtw_read8(adapter, REG_SYS_FUNC_EN);
+		val8 &= ~BIT(0);
+		rtw_write8(adapter, REG_SYS_FUNC_EN, val8);
+		RTW_INFO("%s: BB gated: 0x%02x, store TXPAUSE: %02x\n",
+			 __func__,
+			 rtw_read8(adapter, REG_SYS_FUNC_EN),
+			 pwrpriv->wowlan_txpause_status);
+	} else {
+		val8 = rtw_read8(adapter, REG_SYS_FUNC_EN);
+		val8 |= BIT(0);
+		rtw_write8(adapter, REG_SYS_FUNC_EN, val8);
+		RTW_INFO("%s: BB release: 0x%02x, recover TXPAUSE:%02x\n",
+			 __func__, rtw_read8(adapter, REG_SYS_FUNC_EN),
+			 pwrpriv->wowlan_txpause_status);
+		/* release TX*/
+		rtw_write8(adapter, REG_TXPAUSE, pwrpriv->wowlan_txpause_status);
+	}
+}
+
+static u8 rtw_hal_wow_pattern_generate(_adapter *adapter, u8 idx, struct rtl_wow_pattern *pwow_pattern)
+{
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
+	 u8 *pattern;
+	 u8 len = 0;
+	 u8 *mask;
+
+	u8 mask_hw[MAX_WKFM_SIZE] = {0};
+	u8 content[MAX_WKFM_PATTERN_SIZE] = {0};
+	u8 broadcast_addr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+	u8 multicast_addr1[2] = {0x33, 0x33};
+	u8 multicast_addr2[3] = {0x01, 0x00, 0x5e};
+	u8 mask_len = 0;
+	u8 mac_addr[ETH_ALEN] = {0};
+	u16 count = 0;
+	int i;
+
+	if (pwrctl->wowlan_pattern_idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("%s pattern_idx is more than MAX_FMC_NUM: %d\n",
+			 __func__, MAX_WKFM_CAM_NUM);
+		return _FAIL;
+	}
+
+	pattern = pwrctl->patterns[idx].content;
+	len = pwrctl->patterns[idx].len;
+	mask = pwrctl->patterns[idx].mask;
+
+	_rtw_memcpy(mac_addr, adapter_mac_addr(adapter), ETH_ALEN);
+	_rtw_memset(pwow_pattern, 0, sizeof(struct rtl_wow_pattern));
+
+	mask_len = DIV_ROUND_UP(len, 8);
+
+	/* 1. setup A1 table */
+	if (memcmp(pattern, broadcast_addr, ETH_ALEN) == 0)
+		pwow_pattern->type = PATTERN_BROADCAST;
+	else if (memcmp(pattern, multicast_addr1, 2) == 0)
+		pwow_pattern->type = PATTERN_MULTICAST;
+	else if (memcmp(pattern, multicast_addr2, 3) == 0)
+		pwow_pattern->type = PATTERN_MULTICAST;
+	else if (memcmp(pattern, mac_addr, ETH_ALEN) == 0)
+		pwow_pattern->type = PATTERN_UNICAST;
+	else
+		pwow_pattern->type = PATTERN_INVALID;
+
+	/* translate mask from os to mask for hw */
+
+	/******************************************************************************
+	 * pattern from OS uses 'ethenet frame', like this:
+
+		|    6   |    6   |   2  |     20    |  Variable  |  4  |
+		|--------+--------+------+-----------+------------+-----|
+		|    802.3 Mac Header    | IP Header | TCP Packet | FCS |
+		|   DA   |   SA   | Type |
+
+	 * BUT, packet catched by our HW is in '802.11 frame', begin from LLC,
+
+		|     24 or 30      |    6   |   2  |     20    |  Variable  |  4  |
+		|-------------------+--------+------+-----------+------------+-----|
+		| 802.11 MAC Header |       LLC     | IP Header | TCP Packet | FCS |
+				    | Others | Tpye |
+
+	 * Therefore, we need translate mask_from_OS to mask_to_hw.
+	 * We should left-shift mask by 6 bits, then set the new bit[0~5] = 0,
+	 * because new mask[0~5] means 'SA', but our HW packet begins from LLC,
+	 * bit[0~5] corresponds to first 6 Bytes in LLC, they just don't match.
+	 ******************************************************************************/
+	/* Shift 6 bits */
+	for (i = 0; i < mask_len - 1; i++) {
+		mask_hw[i] = mask[i] >> 6;
+		mask_hw[i] |= (mask[i + 1] & 0x3F) << 2;
+	}
+
+	mask_hw[i] = (mask[i] >> 6) & 0x3F;
+	/* Set bit 0-5 to zero */
+	mask_hw[0] &= 0xC0;
+
+	for (i = 0; i < (MAX_WKFM_SIZE / 4); i++) {
+		pwow_pattern->mask[i] = mask_hw[i * 4];
+		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 1] << 8);
+		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 2] << 16);
+		pwow_pattern->mask[i] |= (mask_hw[i * 4 + 3] << 24);
+	}
+
+	/* To get the wake up pattern from the mask.
+	 * We do not count first 12 bits which means
+	 * DA[6] and SA[6] in the pattern to match HW design. */
+	count = 0;
+	for (i = 12; i < len; i++) {
+		if ((mask[i / 8] >> (i % 8)) & 0x01) {
+			content[count] = pattern[i];
+			count++;
+		}
+	}
+
+	pwow_pattern->crc = rtw_calc_crc(content, count);
+
+	if (pwow_pattern->crc != 0) {
+		if (pwow_pattern->type == PATTERN_INVALID)
+			pwow_pattern->type = PATTERN_VALID;
+	}
+
+	return _SUCCESS;
+}
+
+void rtw_dump_wow_pattern(void *sel, struct rtl_wow_pattern *pwow_pattern, u8 idx)
+{
+	int j;
+
+	RTW_PRINT_SEL(sel, "=======WOW CAM-ID[%d]=======\n", idx);
+	RTW_PRINT_SEL(sel, "[WOW CAM] type:%d\n", pwow_pattern->type);
+	RTW_PRINT_SEL(sel, "[WOW CAM] crc:0x%04x\n", pwow_pattern->crc);
+	for (j = 0; j < 4; j++)
+		RTW_PRINT_SEL(sel, "[WOW CAM] Mask:0x%08x\n", pwow_pattern->mask[j]);
+}
+/*bit definition of pattern match format*/
+#define WOW_VALID_BIT	BIT31
+#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
+#define WOW_BC_BIT		BIT26
+#define WOW_MC_BIT		BIT25
+#define WOW_UC_BIT		BIT24
+#else
+#define WOW_BC_BIT		BIT18
+#define WOW_UC_BIT		BIT17
+#define WOW_MC_BIT		BIT16
+#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
+
+#ifndef CONFIG_WOW_PATTERN_HW_CAM
+#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
+static void rtw_hal_reset_mac_rx(_adapter *adapter)
+{
+	u8 val8 = 0;
+	/* Set REG_CR bit1, bit3, bit7 to 0*/
+	val8 = rtw_read8(adapter, REG_CR);
+	val8 &= 0x75;
+	rtw_write8(adapter, REG_CR, val8);
+	val8 = rtw_read8(adapter, REG_CR);
+	/* Set REG_CR bit1, bit3, bit7 to 1*/
+	val8 |= 0x8a;
+	rtw_write8(adapter, REG_CR, val8);
+	RTW_INFO("0x%04x: %02x\n", REG_CR, rtw_read8(adapter, REG_CR));
+}
+static void rtw_hal_set_wow_rxff_boundary(_adapter *adapter, bool wow_mode)
+{
+	u8 val8 = 0;
+	u16 rxff_bndy = 0;
+	u32 rx_dma_buff_sz = 0;
+
+	val8 = rtw_read8(adapter, REG_FIFOPAGE + 3);
+	if (val8 != 0)
+		RTW_INFO("%s:[%04x]some PKTs in TXPKTBUF\n",
+			 __func__, (REG_FIFOPAGE + 3));
+
+	rtw_hal_reset_mac_rx(adapter);
+
+	if (wow_mode) {
+		rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
+				    (u8 *)&rx_dma_buff_sz);
+		rxff_bndy = rx_dma_buff_sz - 1;
+
+		rtw_write16(adapter, (REG_TRXFF_BNDY + 2), rxff_bndy);
+		RTW_INFO("%s: wow mode, 0x%04x: 0x%04x\n", __func__,
+			 REG_TRXFF_BNDY + 2,
+			 rtw_read16(adapter, (REG_TRXFF_BNDY + 2)));
+	} else {
+		rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ,
+				    (u8 *)&rx_dma_buff_sz);
+		rxff_bndy = rx_dma_buff_sz - 1;
+		rtw_write16(adapter, (REG_TRXFF_BNDY + 2), rxff_bndy);
+		RTW_INFO("%s: normal mode, 0x%04x: 0x%04x\n", __func__,
+			 REG_TRXFF_BNDY + 2,
+			 rtw_read16(adapter, (REG_TRXFF_BNDY + 2)));
+	}
+}
+#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO*/
+#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
+bool rtw_read_from_frame_mask(_adapter *adapter, u8 idx)
+{
+	u32 data_l = 0, data_h = 0, rx_dma_buff_sz = 0, page_sz = 0;
+	u16 offset, rx_buf_ptr = 0;
+	u16 cam_start_offset = 0;
+	u16 ctrl_l = 0, ctrl_h = 0;
+	u8 count = 0, tmp = 0;
+	int i = 0;
+	bool res = _TRUE;
+
+	if (idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("[Error]: %s, pattern index is out of range\n",
+			 __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
+			    (u8 *)&rx_dma_buff_sz);
+
+	if (rx_dma_buff_sz == 0) {
+		RTW_INFO("[Error]: %s, rx_dma_buff_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_RX_PAGE_SIZE, (u8 *)&page_sz);
+
+	if (page_sz == 0) {
+		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	offset = (u16)PageNum(rx_dma_buff_sz, page_sz);
+	cam_start_offset = offset * page_sz;
+
+	ctrl_l = 0x0;
+	ctrl_h = 0x0;
+
+	/* Enable RX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, RXPKT_BUF_SELECT);
+
+	/* Read the WKFM CAM */
+	for (i = 0; i < (WKFMCAM_ADDR_NUM / 2); i++) {
+		/*
+		 * Set Rx packet buffer offset.
+		 * RxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
+		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
+		 * RxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
+		 * * Index: The index of the wake up frame mask
+		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
+		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
+		 */
+		rx_buf_ptr =
+			(cam_start_offset + idx * WKFMCAM_SIZE + i * 8) >> 3;
+		rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, rx_buf_ptr);
+
+		rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
+		data_l = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_L);
+		data_h = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_H);
+
+		RTW_INFO("[%d]: %08x %08x\n", i, data_h, data_l);
+
+		count = 0;
+
+		do {
+			tmp = rtw_read8(adapter, REG_RXPKTBUF_CTRL);
+			rtw_udelay_os(2);
+			count++;
+		} while (!tmp && count < 100);
+
+		if (count >= 100) {
+			RTW_INFO("%s count:%d\n", __func__, count);
+			res = _FALSE;
+		}
+	}
+
+	/* Disable RX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
+		   DISABLE_TRXPKT_BUF_ACCESS);
+	return res;
+}
+
+bool rtw_write_to_frame_mask(_adapter *adapter, u8 idx,
+			     struct  rtl_wow_pattern *context)
+{
+	u32 data = 0, rx_dma_buff_sz = 0, page_sz = 0;
+	u16 offset, rx_buf_ptr = 0;
+	u16 cam_start_offset = 0;
+	u16 ctrl_l = 0, ctrl_h = 0;
+	u8 count = 0, tmp = 0;
+	int res = 0, i = 0;
+
+	if (idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("[Error]: %s, pattern index is out of range\n",
+			 __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_RX_DMA_SZ_WOW,
+			    (u8 *)&rx_dma_buff_sz);
+
+	if (rx_dma_buff_sz == 0) {
+		RTW_INFO("[Error]: %s, rx_dma_buff_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_RX_PAGE_SIZE, (u8 *)&page_sz);
+
+	if (page_sz == 0) {
+		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	offset = (u16)PageNum(rx_dma_buff_sz, page_sz);
+
+	cam_start_offset = offset * page_sz;
+
+	if (IS_HARDWARE_TYPE_8188E(adapter)) {
+		ctrl_l = 0x0001;
+		ctrl_h = 0x0001;
+	} else {
+		ctrl_l = 0x0f01;
+		ctrl_h = 0xf001;
+	}
+
+	/* Enable RX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, RXPKT_BUF_SELECT);
+
+	/* Write the WKFM CAM */
+	for (i = 0; i < WKFMCAM_ADDR_NUM; i++) {
+		/*
+		 * Set Rx packet buffer offset.
+		 * RxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
+		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
+		 * RxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
+		 * * Index: The index of the wake up frame mask
+		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
+		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
+		 */
+		rx_buf_ptr =
+			(cam_start_offset + idx * WKFMCAM_SIZE + i * 4) >> 3;
+		rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, rx_buf_ptr);
+
+		if (i == 0) {
+			if (context->type == PATTERN_VALID)
+				data = WOW_VALID_BIT;
+			else if (context->type == PATTERN_BROADCAST)
+				data = WOW_VALID_BIT | WOW_BC_BIT;
+			else if (context->type == PATTERN_MULTICAST)
+				data = WOW_VALID_BIT | WOW_MC_BIT;
+			else if (context->type == PATTERN_UNICAST)
+				data = WOW_VALID_BIT | WOW_UC_BIT;
+
+			if (context->crc != 0)
+				data |= context->crc;
+
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data);
+			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
+		} else if (i == 1) {
+			data = 0;
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data);
+			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_h);
+		} else if (i == 2 || i == 4) {
+			data = context->mask[i - 2];
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data);
+			/* write to RX packet buffer*/
+			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
+		} else if (i == 3 || i == 5) {
+			data = context->mask[i - 2];
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data);
+			/* write to RX packet buffer*/
+			rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_h);
+		}
+
+		count = 0;
+		do {
+			tmp = rtw_read8(adapter, REG_RXPKTBUF_CTRL);
+			rtw_udelay_os(2);
+			count++;
+		} while (tmp && count < 100);
+
+		if (count >= 100)
+			res = _FALSE;
+		else
+			res = _TRUE;
+	}
+
+	/* Disable RX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
+		   DISABLE_TRXPKT_BUF_ACCESS);
+
+	return res;
+}
+#else /* CONFIG_WOW_PATTERN_IN_TXFIFO */
+bool rtw_read_from_frame_mask(_adapter *adapter, u8 idx)
+{
+	u32 data_l = 0, data_h = 0, rx_dma_buff_sz = 0, page_sz = 0;
+	u16 tx_page_start, tx_buf_ptr = 0;
+	u16 cam_start_offset = 0;
+	u16 ctrl_l = 0, ctrl_h = 0;
+	u8 count = 0, tmp = 0, last_entry = 0;
+	int i = 0;
+	bool res = _TRUE;
+
+	if (idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("[Error]: %s, pattern index is out of range\n",
+			 __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_TX_PAGE_SIZE, (u8 *)&page_sz);
+	if (page_sz == 0) {
+		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_TX_BUFFER_LAST_ENTRY, (u8 *)&last_entry);
+	if (last_entry == 0) {
+		RTW_INFO("[Error]: %s, last entry of tx buffer is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	/* use the last 2 pages for wow pattern e.g. 0xfe and 0xff */
+	tx_page_start = last_entry - 1;
+	cam_start_offset = tx_page_start * page_sz / 8;
+	ctrl_l = 0x0;
+	ctrl_h = 0x0;
+
+	/* Enable TX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, TXPKT_BUF_SELECT);
+
+	/* Read the WKFM CAM */
+	for (i = 0; i < (WKFMCAM_ADDR_NUM / 2); i++) {
+		/*
+		 * Set Tx packet buffer offset.
+		 * TxBufer pointer increases 1, we can access 8 bytes in Tx packet buffer.
+		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
+		 * TxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
+		 * * Index: The index of the wake up frame mask
+		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
+		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
+		 */
+		tx_buf_ptr =
+			(cam_start_offset + idx * WKFMCAM_SIZE + i * 8) >> 3;
+		rtw_write16(adapter, REG_PKTBUF_DBG_CTRL, tx_buf_ptr);
+		rtw_write16(adapter, REG_RXPKTBUF_CTRL, ctrl_l);
+		data_l = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_L);
+		data_h = rtw_read32(adapter, REG_PKTBUF_DBG_DATA_H);
+
+		RTW_INFO("[%d]: %08x %08x\n", i, data_h, data_l);
+
+		count = 0;
+
+		do {
+			tmp = rtw_read32(adapter, REG_PKTBUF_DBG_CTRL) & BIT23;
+			rtw_udelay_os(2);
+			count++;
+		} while (!tmp && count < 100);
+
+		if (count >= 100) {
+			RTW_INFO("%s count:%d\n", __func__, count);
+			res = _FALSE;
+		}
+	}
+
+	/* Disable RX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL,
+		   DISABLE_TRXPKT_BUF_ACCESS);
+	return res;
+}
+
+bool rtw_write_to_frame_mask(_adapter *adapter, u8 idx,
+			     struct  rtl_wow_pattern *context)
+{
+	u32 tx_page_start = 0, page_sz = 0;
+	u16 tx_buf_ptr = 0;
+	u16 cam_start_offset = 0;
+	u32 data_l = 0, data_h = 0;
+	u8 count = 0, tmp = 0, last_entry = 0;
+	int res = 0, i = 0;
+
+	if (idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("[Error]: %s, pattern index is out of range\n",
+			 __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_TX_PAGE_SIZE, (u8 *)&page_sz);
+	if (page_sz == 0) {
+		RTW_INFO("[Error]: %s, page_sz is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	rtw_hal_get_def_var(adapter, HAL_DEF_TX_BUFFER_LAST_ENTRY, (u8 *)&last_entry);
+	if (last_entry == 0) {
+		RTW_INFO("[Error]: %s, last entry of tx buffer is 0!!\n", __func__);
+		return _FALSE;
+	}
+
+	/* use the last 2 pages for wow pattern e.g. 0xfe and 0xff */
+	tx_page_start = last_entry - 1;
+	cam_start_offset = tx_page_start * page_sz / 8;
+
+	/* Write the PATTERN location to BIT_TXBUF_WKCAM_OFFSET */
+	rtw_write8(adapter, REG_TXBUF_WKCAM_OFFSET, cam_start_offset & 0xFF);
+	rtw_write8(adapter, REG_TXBUF_WKCAM_OFFSET + 1, (cam_start_offset >> 8) & 0xFF);
+	/* Enable TX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, TXPKT_BUF_SELECT);
+
+	/* Write the WKFM CAM */
+	for (i = 0; i < WKFMCAM_ADDR_NUM / 2; i++) {
+		/*
+		 * Set Tx packet buffer offset.
+		 * TxBufer pointer increases 1, we can access 8 bytes in Rx packet buffer.
+		 * CAM start offset (unit: 1 byte) =  Index*WKFMCAM_SIZE
+		 * TxBufer pointer addr = (CAM start offset + per entry offset of a WKFMCAM)/8
+		 * * Index: The index of the wake up frame mask
+		 * * WKFMCAM_SIZE: the total size of one WKFM CAM
+		 * * per entry offset of a WKFM CAM: Addr i * 4 bytes
+		 */
+		tx_buf_ptr = cam_start_offset + ((idx * WKFMCAM_SIZE + i * 8) >> 3);
+
+		if (i == 0) {
+			if (context->type == PATTERN_VALID)
+				data_l = WOW_VALID_BIT;
+			else if (context->type == PATTERN_BROADCAST)
+				data_l = WOW_VALID_BIT | WOW_BC_BIT;
+			else if (context->type == PATTERN_MULTICAST)
+				data_l = WOW_VALID_BIT | WOW_MC_BIT;
+			else if (context->type == PATTERN_UNICAST)
+				data_l = WOW_VALID_BIT | WOW_UC_BIT;
+
+			if (context->crc != 0)
+				data_l |= context->crc;
+
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data_l);
+		} else {
+			data_l = context->mask[i * 2 - 2];
+			data_h = context->mask[i * 2 - 1];
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_L, data_l);
+			rtw_write32(adapter, REG_PKTBUF_DBG_DATA_H, data_h);
+		}
+
+		rtw_write32(adapter, REG_PKTBUF_DBG_CTRL, (tx_buf_ptr & 0x1FFF) | BIT23 | (0xff <<24));
+		count = 0;
+		do {
+			tmp = rtw_read32(adapter, REG_PKTBUF_DBG_CTRL) & BIT23;
+			rtw_udelay_os(2);
+			count++;
+		} while (tmp && count < 100);
+
+		if (count >= 100) {
+			res = _FALSE;
+			RTW_INFO("%s write failed\n", __func__);
+		} else {
+			res = _TRUE;
+			RTW_INFO("%s write OK\n", __func__);
+		}
+	}
+
+	/* Disable TX packet buffer access */
+	rtw_write8(adapter, REG_PKT_BUFF_ACCESS_CTRL, DISABLE_TRXPKT_BUF_ACCESS);
+	return res;
+}
+#endif /* CONFIG_WOW_PATTERN_IN_TXFIFO */
+
+void rtw_clean_pattern(_adapter *adapter)
+{
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
+	struct rtl_wow_pattern zero_pattern;
+	int i = 0;
+
+	_rtw_memset(&zero_pattern, 0, sizeof(struct rtl_wow_pattern));
+
+	zero_pattern.type = PATTERN_INVALID;
+
+	for (i = 0; i < MAX_WKFM_CAM_NUM; i++)
+		rtw_write_to_frame_mask(adapter, i, &zero_pattern);
+
+	rtw_write8(adapter, REG_WKFMCAM_NUM, 0);
+}
+#if 0
+static int rtw_hal_set_pattern(_adapter *adapter, u8 *pattern,
+			       u8 len, u8 *mask, u8 idx)
+{
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
+	struct mlme_ext_priv *pmlmeext = NULL;
+	struct mlme_ext_info *pmlmeinfo = NULL;
+	struct rtl_wow_pattern wow_pattern;
+	u8 mask_hw[MAX_WKFM_SIZE] = {0};
+	u8 content[MAX_WKFM_PATTERN_SIZE] = {0};
+	u8 broadcast_addr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+	u8 multicast_addr1[2] = {0x33, 0x33};
+	u8 multicast_addr2[3] = {0x01, 0x00, 0x5e};
+	u8 res = _FALSE, index = 0, mask_len = 0;
+	u8 mac_addr[ETH_ALEN] = {0};
+	u16 count = 0;
+	int i, j;
+
+	if (pwrctl->wowlan_pattern_idx > MAX_WKFM_CAM_NUM) {
+		RTW_INFO("%s pattern_idx is more than MAX_FMC_NUM: %d\n",
+			 __func__, MAX_WKFM_CAM_NUM);
+		return _FALSE;
+	}
+
+	pmlmeext = &adapter->mlmeextpriv;
+	pmlmeinfo = &pmlmeext->mlmext_info;
+	_rtw_memcpy(mac_addr, adapter_mac_addr(adapter), ETH_ALEN);
+	_rtw_memset(&wow_pattern, 0, sizeof(struct rtl_wow_pattern));
+
+	mask_len = DIV_ROUND_UP(len, 8);
+
+	/* 1. setup A1 table */
+	if (memcmp(pattern, broadcast_addr, ETH_ALEN) == 0)
+		wow_pattern.type = PATTERN_BROADCAST;
+	else if (memcmp(pattern, multicast_addr1, 2) == 0)
+		wow_pattern.type = PATTERN_MULTICAST;
+	else if (memcmp(pattern, multicast_addr2, 3) == 0)
+		wow_pattern.type = PATTERN_MULTICAST;
+	else if (memcmp(pattern, mac_addr, ETH_ALEN) == 0)
+		wow_pattern.type = PATTERN_UNICAST;
+	else
+		wow_pattern.type = PATTERN_INVALID;
+
+	/* translate mask from os to mask for hw */
+
+/******************************************************************************
+ * pattern from OS uses 'ethenet frame', like this:
+
+	|    6   |    6   |   2  |     20    |  Variable  |  4  |
+	|--------+--------+------+-----------+------------+-----|
+	|    802.3 Mac Header    | IP Header | TCP Packet | FCS |
+	|   DA   |   SA   | Type |
+
+ * BUT, packet catched by our HW is in '802.11 frame', begin from LLC,
+
+	|     24 or 30      |    6   |   2  |     20    |  Variable  |  4  |
+	|-------------------+--------+------+-----------+------------+-----|
+	| 802.11 MAC Header |       LLC     | IP Header | TCP Packet | FCS |
+			    | Others | Tpye |
+
+ * Therefore, we need translate mask_from_OS to mask_to_hw.
+ * We should left-shift mask by 6 bits, then set the new bit[0~5] = 0,
+ * because new mask[0~5] means 'SA', but our HW packet begins from LLC,
+ * bit[0~5] corresponds to first 6 Bytes in LLC, they just don't match.
+ ******************************************************************************/
+	/* Shift 6 bits */
+	for (i = 0; i < mask_len - 1; i++) {
+		mask_hw[i] = mask[i] >> 6;
+		mask_hw[i] |= (mask[i + 1] & 0x3F) << 2;
+	}
+
+	mask_hw[i] = (mask[i] >> 6) & 0x3F;
+	/* Set bit 0-5 to zero */
+	mask_hw[0] &= 0xC0;
+
+	for (i = 0; i < (MAX_WKFM_SIZE / 4); i++) {
+		wow_pattern.mask[i] = mask_hw[i * 4];
+		wow_pattern.mask[i] |= (mask_hw[i * 4 + 1] << 8);
+		wow_pattern.mask[i] |= (mask_hw[i * 4 + 2] << 16);
+		wow_pattern.mask[i] |= (mask_hw[i * 4 + 3] << 24);
+	}
+
+	/* To get the wake up pattern from the mask.
+	 * We do not count first 12 bits which means
+	 * DA[6] and SA[6] in the pattern to match HW design. */
+	count = 0;
+	for (i = 12; i < len; i++) {
+		if ((mask[i / 8] >> (i % 8)) & 0x01) {
+			content[count] = pattern[i];
+			count++;
+		}
+	}
+
+	wow_pattern.crc = rtw_calc_crc(content, count);
+
+	if (wow_pattern.crc != 0) {
+		if (wow_pattern.type == PATTERN_INVALID)
+			wow_pattern.type = PATTERN_VALID;
+	}
+
+	index = idx;
+
+	if (!pwrctl->bInSuspend)
+		index += 2;
+
+	/* write pattern */
+	res = rtw_write_to_frame_mask(adapter, index, &wow_pattern);
+
+	if (res == _FALSE)
+		RTW_INFO("%s: ERROR!! idx: %d write_to_frame_mask_cam fail\n",
+			 __func__, idx);
+
+	return res;
+}
+#endif
+
+void rtw_fill_pattern(_adapter *adapter)
+{
+	int i = 0, total = 0, index;
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	struct rtl_wow_pattern wow_pattern;
+
+	total = pwrpriv->wowlan_pattern_idx;
+
+	if (total > MAX_WKFM_CAM_NUM)
+		total = MAX_WKFM_CAM_NUM;
+
+	for (i = 0 ; i < total ; i++) {
+		if (_SUCCESS == rtw_hal_wow_pattern_generate(adapter, i, &wow_pattern)) {
+
+			index = i;
+			if (!pwrpriv->bInSuspend)
+				index += 2;
+			rtw_dump_wow_pattern(RTW_DBGDUMP, &wow_pattern, i);
+			if (rtw_write_to_frame_mask(adapter, index, &wow_pattern) == _FALSE)
+				RTW_INFO("%s: ERROR!! idx: %d write_to_frame_mask_cam fail\n", __func__, i);
+		}
+
+	}
+	rtw_write8(adapter, REG_WKFMCAM_NUM, total);
+
+}
+
+#else /*CONFIG_WOW_PATTERN_HW_CAM*/
+
+#define WOW_CAM_ACCESS_TIMEOUT_MS	200
+static u32 _rtw_wow_pattern_read_cam(_adapter *adapter, u8 addr)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
+
+	u32 rdata = 0;
+	u32 cnt = 0;
+	systime start = 0;
+	u8 timeout = 0;
+	u8 rst = _FALSE;
+
+	_enter_critical_mutex(mutex, NULL);
+
+	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_ADDR_V2(addr));
+
+	start = rtw_get_current_time();
+	while (1) {
+		if (rtw_is_surprise_removed(adapter))
+			break;
+
+		cnt++;
+		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1)) {
+			rst = _SUCCESS;
+			break;
+		}
+		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
+			timeout = 1;
+			break;
+		}
+	}
+
+	rdata = rtw_read32(adapter, REG_WKFMCAM_RWD);
+
+	_exit_critical_mutex(mutex, NULL);
+
+	/*RTW_INFO("%s ==> addr:0x%02x , rdata:0x%08x\n", __func__, addr, rdata);*/
+
+	if (timeout)
+		RTW_ERR(FUNC_ADPT_FMT" failed due to polling timeout\n", FUNC_ADPT_ARG(adapter));
+
+	return rdata;
+}
+void rtw_wow_pattern_read_cam_ent(_adapter *adapter, u8 id, struct  rtl_wow_pattern *context)
+{
+	int i;
+	u32 rdata;
+
+	_rtw_memset(context, 0, sizeof(struct  rtl_wow_pattern));
+
+	for (i = 4; i >= 0; i--) {
+		rdata = _rtw_wow_pattern_read_cam(adapter, (id << 3) | i);
+
+		switch (i) {
+		case 4:
+			if (rdata & WOW_BC_BIT)
+				context->type = PATTERN_BROADCAST;
+			else if (rdata & WOW_MC_BIT)
+				context->type = PATTERN_MULTICAST;
+			else if (rdata & WOW_UC_BIT)
+				context->type = PATTERN_UNICAST;
+			else
+				context->type = PATTERN_INVALID;
+
+			context->crc = rdata & 0xFFFF;
+			break;
+		default:
+			_rtw_memcpy(&context->mask[i], (u8 *)(&rdata), 4);
+			break;
+		}
+	}
+}
+
+static void _rtw_wow_pattern_write_cam(_adapter *adapter, u8 addr, u32 wdata)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
+	u32 cnt = 0;
+	systime start = 0, end = 0;
+	u8 timeout = 0;
+
+	/*RTW_INFO("%s ==> addr:0x%02x , wdata:0x%08x\n", __func__, addr, wdata);*/
+	_enter_critical_mutex(mutex, NULL);
+
+	rtw_write32(adapter, REG_WKFMCAM_RWD, wdata);
+	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_WE | BIT_WKFCAM_ADDR_V2(addr));
+
+	start = rtw_get_current_time();
+	while (1) {
+		if (rtw_is_surprise_removed(adapter))
+			break;
+
+		cnt++;
+		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1))
+			break;
+
+		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
+			timeout = 1;
+			break;
+		}
+	}
+	end = rtw_get_current_time();
+
+	_exit_critical_mutex(mutex, NULL);
+
+	if (timeout) {
+		RTW_ERR(FUNC_ADPT_FMT" addr:0x%02x, wdata:0x%08x, to:%u, polling:%u, %d ms\n"
+			, FUNC_ADPT_ARG(adapter), addr, wdata, timeout, cnt, rtw_get_time_interval_ms(start, end));
+	}
+}
+
+void rtw_wow_pattern_write_cam_ent(_adapter *adapter, u8 id, struct  rtl_wow_pattern *context)
+{
+	int j;
+	u8 addr;
+	u32 wdata = 0;
+
+	for (j = 4; j >= 0; j--) {
+		switch (j) {
+		case 4:
+			wdata = context->crc;
+
+			if (PATTERN_BROADCAST == context->type)
+				wdata |= WOW_BC_BIT;
+			if (PATTERN_MULTICAST == context->type)
+				wdata |= WOW_MC_BIT;
+			if (PATTERN_UNICAST == context->type)
+				wdata |= WOW_UC_BIT;
+			if (PATTERN_INVALID != context->type)
+				wdata |= WOW_VALID_BIT;
+			break;
+		default:
+			wdata = context->mask[j];
+			break;
+		}
+
+		addr = (id << 3) + j;
+
+		_rtw_wow_pattern_write_cam(adapter, addr, wdata);
+	}
+}
+
+static u8 _rtw_wow_pattern_clean_cam(_adapter *adapter)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	_mutex *mutex = &pwrpriv->wowlan_pattern_cam_mutex;
+	u32 cnt = 0;
+	systime start = 0;
+	u8 timeout = 0;
+	u8 rst = _FAIL;
+
+	_enter_critical_mutex(mutex, NULL);
+	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_CLR_V1);
+
+	start = rtw_get_current_time();
+	while (1) {
+		if (rtw_is_surprise_removed(adapter))
+			break;
+
+		cnt++;
+		if (0 == (rtw_read32(adapter, REG_WKFMCAM_CMD) & BIT_WKFCAM_POLLING_V1)) {
+			rst = _SUCCESS;
+			break;
+		}
+		if (rtw_get_passing_time_ms(start) > WOW_CAM_ACCESS_TIMEOUT_MS) {
+			timeout = 1;
+			break;
+		}
+	}
+	_exit_critical_mutex(mutex, NULL);
+
+	if (timeout)
+		RTW_ERR(FUNC_ADPT_FMT" falied ,polling timeout\n", FUNC_ADPT_ARG(adapter));
+
+	return rst;
+}
+
+void rtw_clean_pattern(_adapter *adapter)
+{
+	if (_FAIL == _rtw_wow_pattern_clean_cam(adapter))
+		RTW_ERR("rtw_clean_pattern failed\n");
+}
+void rtw_fill_pattern(_adapter *adapter)
+{
+	int i = 0, total = 0;
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	struct rtl_wow_pattern wow_pattern;
+
+	total = pwrpriv->wowlan_pattern_idx;
+
+	if (total > MAX_WKFM_CAM_NUM)
+		total = MAX_WKFM_CAM_NUM;
+
+	for (i = 0 ; i < total ; i++) {
+		if (_SUCCESS == rtw_hal_wow_pattern_generate(adapter, i, &wow_pattern)) {
+			rtw_dump_wow_pattern(RTW_DBGDUMP, &wow_pattern, i);
+			rtw_wow_pattern_write_cam_ent(adapter, i, &wow_pattern);
+		}
+	}
+}
+
+#endif
+void rtw_wow_pattern_cam_dump(_adapter *adapter)
+{
+
+#ifndef CONFIG_WOW_PATTERN_HW_CAM
+	int i;
+
+	for (i = 0 ; i < MAX_WKFM_CAM_NUM; i++) {
+		RTW_INFO("=======[%d]=======\n", i);
+		rtw_read_from_frame_mask(adapter, i);
+	}
+#else
+	struct  rtl_wow_pattern context;
+	int i;
+
+	for (i = 0 ; i < MAX_WKFM_CAM_NUM; i++) {
+		rtw_wow_pattern_read_cam_ent(adapter, i, &context);
+		rtw_dump_wow_pattern(RTW_DBGDUMP, &context, i);
+	}
+
+#endif
+}
+
+
+static void rtw_hal_dl_pattern(_adapter *adapter, u8 mode)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+
+	switch (mode) {
+	case 0:
+		rtw_clean_pattern(adapter);
+		RTW_INFO("%s: total patterns: %d\n", __func__, pwrpriv->wowlan_pattern_idx);
+		break;
+	case 1:
+		rtw_set_default_pattern(adapter);
+		rtw_fill_pattern(adapter);
+		RTW_INFO("%s: pattern total: %d downloaded\n", __func__, pwrpriv->wowlan_pattern_idx);
+		break;
+	case 2:
+		rtw_clean_pattern(adapter);
+		rtw_wow_pattern_sw_reset(adapter);
+		RTW_INFO("%s: clean patterns\n", __func__);
+		break;
+	default:
+		RTW_INFO("%s: unknown mode\n", __func__);
+		break;
+	}
+}
+
+static void rtw_hal_wow_enable(_adapter *adapter)
+{
+	struct registry_priv  *registry_par = &adapter->registrypriv;
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
+	struct security_priv *psecuritypriv = &adapter->securitypriv;
+	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
+	struct sta_info *psta = NULL;
+	PHAL_DATA_TYPE pHalData = GET_HAL_DATA(adapter);
+	int res;
+	u16 media_status_rpt;
+	u8 no_wake = 0, i;
+	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	_adapter *iface;
+#ifdef CONFIG_GPIO_WAKEUP
+	u8 val8 = 0;
+#endif
+
+#ifdef CONFIG_LPS_PG
+	u8 lps_pg_hdl_id = 0;
+#endif
+
+
+
+	if(registry_par->suspend_type == FW_IPS_DISABLE_BBRF &&
+	!check_fwstate(pmlmepriv, WIFI_ASOC_STATE))
+		no_wake = 1;
+
+	RTW_PRINT(FUNC_ADPT_FMT " WOWLAN_ENABLE\n", FUNC_ADPT_ARG(adapter));
+	rtw_hal_gate_bb(adapter, _TRUE);
+	
+	for (i = 0; i < dvobj->iface_nums; i++) {
+		iface = dvobj->padapters[i];
+		/* Start Usb TxDMA */
+		if(iface) {
+			RTW_INFO(ADPT_FMT "enable TX\n", ADPT_ARG(iface));
+			RTW_ENABLE_FUNC(iface, DF_TX_BIT);
+		}
+	}
+	
+#ifdef CONFIG_GTK_OL
+	if (psecuritypriv->binstallKCK_KEK == _TRUE)
+		rtw_hal_fw_sync_cam_id(adapter);
+#endif
+	if (IS_HARDWARE_TYPE_8723B(adapter))
+		rtw_hal_backup_rate(adapter);
+
+	rtw_hal_fw_dl(adapter, _TRUE);
+	if(no_wake)
+		media_status_rpt = RT_MEDIA_DISCONNECT;
+	else
+		media_status_rpt = RT_MEDIA_CONNECT;
+	rtw_hal_set_hwreg(adapter, HW_VAR_H2C_FW_JOINBSSRPT,
+			  (u8 *)&media_status_rpt);
+
+	/* RX DMA stop */
+	#if defined(CONFIG_RTL8188E)
+	if (IS_HARDWARE_TYPE_8188E(adapter))
+		rtw_hal_disable_tx_report(adapter);
+	#endif
+
+	res = rtw_hal_pause_rx_dma(adapter);
+	if (res == _FAIL)
+		RTW_PRINT("[WARNING] pause RX DMA fail\n");
+
+	#ifndef CONFIG_WOW_PATTERN_HW_CAM
+	/* Reconfig RX_FF Boundary */
+	#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
+	rtw_hal_set_wow_rxff_boundary(adapter, _TRUE);
+	#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
+	#endif
+
+	/* redownload wow pattern */
+	if(!no_wake)
+		rtw_hal_dl_pattern(adapter, 1);
+
+	if (!pwrctl->wowlan_pno_enable) {
+		psta = rtw_get_stainfo(&adapter->stapriv, get_bssid(pmlmepriv));
+
+		if (psta != NULL) {
+			#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
+			adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
+			adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
+			rtw_hal_set_default_port_id_cmd(adapter, psta->cmn.mac_id);
+			#endif
+			if(!no_wake)
+				rtw_sta_media_status_rpt(adapter, psta, 1);
+		}
+#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
+		else {
+			if(registry_par->suspend_type == FW_IPS_WRC) {
+				adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
+				adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
+				rtw_hal_set_default_port_id_cmd(adapter, 0);
+			}
+		}
+#endif /* CONFIG_FW_MULTI_PORT_SUPPORT */
+	}
+
+#if defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)
+	/* Enable CPWM2 only. */
+	res = rtw_hal_enable_cpwm2(adapter);
+	if (res == _FAIL)
+		RTW_PRINT("[WARNING] enable cpwm2 fail\n");
+#endif
+#ifdef CONFIG_GPIO_WAKEUP
+#ifdef CONFIG_RTW_ONE_PIN_GPIO
+	rtw_hal_switch_gpio_wl_ctrl(adapter, pwrctl->wowlan_gpio_index, _TRUE);
+	rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
+#else
+#ifdef CONFIG_WAKEUP_GPIO_INPUT_MODE
+	if (pwrctl->is_high_active == 0)
+		rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
+	else
+		rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index,
+			GPIO_OUTPUT_LOW);
+#else
+	val8 = (pwrctl->is_high_active == 0) ? 1 : 0;
+	rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index, val8);
+	rtw_hal_switch_gpio_wl_ctrl(adapter, pwrctl->wowlan_gpio_index, _TRUE);
+	RTW_INFO("%s: set GPIO_%d to OUTPUT %s state in wow suspend and %s_ACTIVE.\n",
+		 __func__, pwrctl->wowlan_gpio_index, 
+		 pwrctl->wowlan_gpio_output_state ? "HIGH" : "LOW",
+		 pwrctl->is_high_active ? "HIGI" : "LOW");
+#endif /* CONFIG_WAKEUP_GPIO_INPUT_MODE */
+#endif /* CONFIG_RTW_ONE_PIN_GPIO */
+#endif /* CONFIG_GPIO_WAKEUP */
+	/* Set WOWLAN H2C command. */
+	RTW_PRINT("Set WOWLan cmd\n");
+	rtw_hal_set_fw_wow_related_cmd(adapter, 1);
+
+	res = rtw_hal_check_wow_ctrl(adapter, _TRUE);
+
+	if (res == _FALSE)
+		RTW_INFO("[Error]%s: set wowlan CMD fail!!\n", __func__);
+
+	pwrctl->wowlan_wake_reason =
+		rtw_read8(adapter, REG_WOWLAN_WAKE_REASON);
+
+	RTW_PRINT("wowlan_wake_reason: 0x%02x\n",
+		  pwrctl->wowlan_wake_reason);
+#ifdef CONFIG_GTK_OL_DBG
+	dump_sec_cam(RTW_DBGDUMP, adapter);
+	dump_sec_cam_cache(RTW_DBGDUMP, adapter);
+#endif
+
+#ifdef CONFIG_LPS_PG
+	if (pwrctl->lps_level == LPS_PG) {
+		lps_pg_hdl_id = LPS_PG_INFO_CFG;
+		rtw_hal_set_hwreg(adapter, HW_VAR_LPS_PG_HANDLE, (u8 *)(&lps_pg_hdl_id));
+	}
+#endif
+
+#ifdef CONFIG_USB_HCI
+	/* free adapter's resource */
+	rtw_mi_intf_stop(adapter);
+
+#endif
+#if defined(CONFIG_USB_HCI) || defined(CONFIG_PCI_HCI)
+	/* Invoid SE0 reset signal during suspending*/
+	rtw_write8(adapter, REG_RSV_CTRL, 0x20);
+	if (IS_8188F(pHalData->version_id) == FALSE
+		&& IS_8188GTV(pHalData->version_id) == FALSE)
+		rtw_write8(adapter, REG_RSV_CTRL, 0x60);
+#endif
+
+	rtw_hal_gate_bb(adapter, _FALSE);
+}
+
+#define DBG_WAKEUP_REASON
+#ifdef DBG_WAKEUP_REASON
+void _dbg_wake_up_reason_string(_adapter *adapter, const char *srt_res)
+{
+	RTW_INFO(ADPT_FMT "- wake up reason - %s\n", ADPT_ARG(adapter), srt_res);
+}
+void _dbg_rtw_wake_up_reason(_adapter *adapter, u8 reason)
+{
+	if (RX_PAIRWISEKEY == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx pairwise key");
+	else if (RX_GTK == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx GTK");
+	else if (RX_FOURWAY_HANDSHAKE == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx four way handshake");
+	else if (RX_DISASSOC == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx disassoc");
+	else if (RX_DEAUTH == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx deauth");
+	else if (RX_ARP_REQUEST == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx ARP request");
+	else if (FW_DECISION_DISCONNECT == reason)
+		_dbg_wake_up_reason_string(adapter, "FW detect disconnect");
+	else if (RX_MAGIC_PKT == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx magic packet");
+	else if (RX_UNICAST_PKT == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx unicast packet");
+	else if (RX_PATTERN_PKT == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx pattern packet");
+	else if (RTD3_SSID_MATCH == reason)
+		_dbg_wake_up_reason_string(adapter, "RTD3 SSID match");
+	else if (RX_REALWOW_V2_WAKEUP_PKT == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx real WOW V2 wakeup packet");
+	else if (RX_REALWOW_V2_ACK_LOST == reason)
+		_dbg_wake_up_reason_string(adapter, "Rx real WOW V2 ack lost");
+	else if (ENABLE_FAIL_DMA_IDLE == reason)
+		_dbg_wake_up_reason_string(adapter, "enable fail DMA idle");
+	else if (ENABLE_FAIL_DMA_PAUSE == reason)
+		_dbg_wake_up_reason_string(adapter, "enable fail DMA pause");
+	else if (AP_OFFLOAD_WAKEUP == reason)
+		_dbg_wake_up_reason_string(adapter, "AP offload wakeup");
+	else if (CLK_32K_UNLOCK == reason)
+		_dbg_wake_up_reason_string(adapter, "clk 32k unlock");
+	else if (RTIME_FAIL_DMA_IDLE == reason)
+		_dbg_wake_up_reason_string(adapter, "RTIME fail DMA idle");
+	else if (CLK_32K_LOCK == reason)
+		_dbg_wake_up_reason_string(adapter, "clk 32k lock");
+	#ifdef CONFIG_WOW_KEEP_ALIVE_PATTERN
+	else if (WOW_KEEPALIVE_ACK_TIMEOUT == reason)
+		_dbg_wake_up_reason_string(adapter, "rx keep alive ack timeout");
+	else if (WOW_KEEPALIVE_WAKE == reason)
+		_dbg_wake_up_reason_string(adapter, "rx keep alive wake pattern");
+	#endif /*CONFIG_WOW_KEEP_ALIVE_PATTERN*/
+	else
+		_dbg_wake_up_reason_string(adapter, "unknown reasoen");
+}
+#endif
+
+static void rtw_hal_wow_disable(_adapter *adapter)
+{
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
+	struct security_priv *psecuritypriv = &adapter->securitypriv;
+	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
+	struct sta_info *psta = NULL;
+	struct registry_priv  *registry_par = &adapter->registrypriv;
+	int res;
+	u16 media_status_rpt;
+
+	RTW_PRINT("%s, WOWLAN_DISABLE\n", __func__);
+	
+	if(registry_par->suspend_type == FW_IPS_DISABLE_BBRF && !check_fwstate(pmlmepriv, WIFI_ASOC_STATE)) {
+		RTW_INFO("FW_IPS_DISABLE_BBRF resume\n");
+		return;
+	}
+	
+	if (!pwrctl->wowlan_pno_enable) {
+		psta = rtw_get_stainfo(&adapter->stapriv, get_bssid(pmlmepriv));
+		if (psta != NULL)
+			rtw_sta_media_status_rpt(adapter, psta, 0);
+		else
+			RTW_INFO("%s: psta is null\n", __func__);
+	}
+
+	if (0) {
+		RTW_INFO("0x630:0x%02x\n", rtw_read8(adapter, 0x630));
+		RTW_INFO("0x631:0x%02x\n", rtw_read8(adapter, 0x631));
+		RTW_INFO("0x634:0x%02x\n", rtw_read8(adapter, 0x634));
+		RTW_INFO("0x1c7:0x%02x\n", rtw_read8(adapter, 0x1c7));
+	}
+
+	pwrctl->wowlan_wake_reason = rtw_read8(adapter, REG_WOWLAN_WAKE_REASON);
+
+	RTW_PRINT("wakeup_reason: 0x%02x\n",
+		  pwrctl->wowlan_wake_reason);
+	#ifdef DBG_WAKEUP_REASON
+	_dbg_rtw_wake_up_reason(adapter, pwrctl->wowlan_wake_reason);
+	#endif
+
+	rtw_hal_set_fw_wow_related_cmd(adapter, 0);
+
+	res = rtw_hal_check_wow_ctrl(adapter, _FALSE);
+
+	#if defined(CONFIG_RTL8188E)
+	if (IS_HARDWARE_TYPE_8188E(adapter))
+		rtw_hal_enable_tx_report(adapter);
+	#endif
+
+	if ((pwrctl->wowlan_wake_reason != RX_DISASSOC) &&
+		(pwrctl->wowlan_wake_reason != RX_DEAUTH) &&
+		(pwrctl->wowlan_wake_reason != FW_DECISION_DISCONNECT)) {
+		rtw_hal_get_aoac_rpt(adapter);
+		rtw_hal_update_sw_security_info(adapter);
+	}
+
+	if (res == _FALSE) {
+		RTW_INFO("[Error]%s: disable WOW cmd fail\n!!", __func__);
+		rtw_hal_force_enable_rxdma(adapter);
+	}
+
+	rtw_hal_gate_bb(adapter, _TRUE);
+
+	res = rtw_hal_pause_rx_dma(adapter);
+	if (res == _FAIL)
+		RTW_PRINT("[WARNING] pause RX DMA fail\n");
+
+	/* clean HW pattern match */
+	rtw_hal_dl_pattern(adapter, 0);
+
+	#ifndef CONFIG_WOW_PATTERN_HW_CAM
+	/* config RXFF boundary to original */
+	#ifndef CONFIG_WOW_PATTERN_IN_TXFIFO
+	rtw_hal_set_wow_rxff_boundary(adapter, _FALSE);
+	#endif /*CONFIG_WOW_PATTERN_IN_TXFIFO*/
+	#endif
+	rtw_hal_release_rx_dma(adapter);
+
+	rtw_hal_fw_dl(adapter, _FALSE);
+
+#ifdef CONFIG_GPIO_WAKEUP
+
+#ifdef CONFIG_RTW_ONE_PIN_GPIO
+	rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
+#else
+#ifdef CONFIG_WAKEUP_GPIO_INPUT_MODE
+	if (pwrctl->is_high_active == 0)
+		rtw_hal_set_input_gpio(adapter, pwrctl->wowlan_gpio_index);
+	else
+		rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index,
+			GPIO_OUTPUT_LOW);
+#else
+	rtw_hal_set_output_gpio(adapter, pwrctl->wowlan_gpio_index
+		, pwrctl->wowlan_gpio_output_state);
+	RTW_INFO("%s: set GPIO_%d to OUTPUT %s state in wow resume and %s_ACTIVE.\n",
+		 __func__, pwrctl->wowlan_gpio_index, 
+		 pwrctl->wowlan_gpio_output_state ? "HIGH" : "LOW",
+		 pwrctl->is_high_active ? "HIGI" : "LOW");
+#endif /* CONFIG_WAKEUP_GPIO_INPUT_MODE */
+#endif /* CONFIG_RTW_ONE_PIN_GPIO */
+#endif /* CONFIG_GPIO_WAKEUP */
+	if ((pwrctl->wowlan_wake_reason != FW_DECISION_DISCONNECT) &&
+	    (pwrctl->wowlan_wake_reason != RX_PAIRWISEKEY) &&
+	    (pwrctl->wowlan_wake_reason != RX_DISASSOC) &&
+	    (pwrctl->wowlan_wake_reason != RX_DEAUTH)) {
+
+		media_status_rpt = RT_MEDIA_CONNECT;
+		rtw_hal_set_hwreg(adapter, HW_VAR_H2C_FW_JOINBSSRPT,
+				  (u8 *)&media_status_rpt);
+
+		if (psta != NULL) {
+			#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
+			adapter_to_dvobj(adapter)->dft.port_id = 0xFF;
+			adapter_to_dvobj(adapter)->dft.mac_id = 0xFF;
+			rtw_hal_set_default_port_id_cmd(adapter, psta->cmn.mac_id);
+			#endif
+			rtw_sta_media_status_rpt(adapter, psta, 1);
+		}
+	}
+	rtw_hal_gate_bb(adapter, _FALSE);
 }
 #endif /*CONFIG_WOWLAN*/
 
@@ -14240,8 +14095,7 @@ void rtw_hal_check_rxfifo_full(_adapter *adapter)
 		    IS_8192E(pHalData->version_id) ||
 		    IS_8703B_SERIES(pHalData->version_id) ||
 		    IS_8723D_SERIES(pHalData->version_id) ||
-		    IS_8192F_SERIES(pHalData->version_id) ||
-		    IS_8822C_SERIES(pHalData->version_id)) {
+		    IS_8192F_SERIES(pHalData->version_id)) {
 			rtw_write8(adapter, REG_RXERR_RPT + 3, rtw_read8(adapter, REG_RXERR_RPT + 3) | 0xa0);
 			save_cnt = _TRUE;
 		} else {
@@ -15544,9 +15398,9 @@ void rtw_dump_phy_rx_counters(_adapter *padapter, struct dbg_rx_counter *rx_coun
 		ofdmcrc	= phy_query_bb_reg(padapter, 0xF94, bMaskHWord);
 		htcrc	= phy_query_bb_reg(padapter, 0xF90, bMaskHWord);
 		vht_err	= 0;
-		OFDM_FA = phy_query_bb_reg(padapter, 0xCF0, bMaskLWord) + phy_query_bb_reg(padapter, 0xCF0, bMaskHWord) +
-			phy_query_bb_reg(padapter, 0xDA0, bMaskHWord) + phy_query_bb_reg(padapter, 0xDA4, bMaskLWord) +
-			phy_query_bb_reg(padapter, 0xDA4, bMaskHWord) + phy_query_bb_reg(padapter, 0xDA8, bMaskLWord);
+		OFDM_FA = phy_query_bb_reg(padapter, 0xCF0, bMaskLWord) + phy_query_bb_reg(padapter, 0xCF2, bMaskLWord) +
+			phy_query_bb_reg(padapter, 0xDA2, bMaskLWord) + phy_query_bb_reg(padapter, 0xDA4, bMaskLWord) +
+			phy_query_bb_reg(padapter, 0xDA6, bMaskLWord) + phy_query_bb_reg(padapter, 0xDA8, bMaskLWord);
 
 		CCK_FA = (rtw_read8(padapter, 0xA5B) << 8) | (rtw_read8(padapter, 0xA5C));
 	}
@@ -15583,7 +15437,6 @@ void rtw_reset_phy_rx_counters(_adapter *padapter)
 		/* reset CCK CCA counter */
 		phy_set_bb_reg(padapter, 0x1a2c, BIT(13) | BIT(12), 0);
 		phy_set_bb_reg(padapter, 0x1a2c, BIT(13) | BIT(12), 2);
-		rtw_reset_phy_trx_ok_counters(padapter);
 
 	} else if (IS_HARDWARE_TYPE_JAGUAR3_11N(padapter)) {
 		/* reset CCK FA and CCK CCA counter */

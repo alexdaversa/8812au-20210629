@@ -356,7 +356,6 @@ void Init_ODM_ComInfo(_adapter *adapter)
 	PHAL_DATA_TYPE	pHalData = GET_HAL_DATA(adapter);
 	struct dm_struct	*pDM_Odm = &(pHalData->odmpriv);
 	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(adapter);
-	struct rf_ctl_t *rfctl = dvobj_to_rfctl(dvobj);
 	int i;
 
 	/*phydm_op_mode could be change for different scenarios: ex: SoftAP - PHYDM_BALANCE_MODE*/
@@ -406,6 +405,8 @@ void Init_ODM_ComInfo(_adapter *adapter)
 		/* 1 ============== End of BoardType ============== */
 	}
 
+	rtw_hal_set_odm_var(adapter, HAL_ODM_REGULATION, NULL, _TRUE);
+
 #ifdef CONFIG_DFS_MASTER
 	rtw_odm_update_dfs_region(dvobj);
 	odm_cmn_info_hook(pDM_Odm, ODM_CMNINFO_DFS_MASTER_ENABLE, &(adapter_to_rfctl(adapter)->radar_detect_enabled));
@@ -435,12 +436,11 @@ void Init_ODM_ComInfo(_adapter *adapter)
 
 	/* waiting for PhyDMV034 support*/
 	odm_cmn_info_hook(pDM_Odm, ODM_CMNINFO_MANUAL_SUPPORTABILITY, &(adapter->registrypriv.phydm_ability)); 
-
 	/*Add by YuChen for adaptivity init*/
-	odm_cmn_info_hook(pDM_Odm, ODM_CMNINFO_ADAPTIVITY, &rfctl->adaptivity_en);
+	odm_cmn_info_hook(pDM_Odm, ODM_CMNINFO_ADAPTIVITY, &(adapter->registrypriv.adaptivity_en));
+	phydm_adaptivity_info_init(pDM_Odm, PHYDM_ADAPINFO_CARRIER_SENSE_ENABLE, (adapter->registrypriv.adaptivity_mode != 0) ? TRUE : FALSE);
 	phydm_adaptivity_info_init(pDM_Odm, PHYDM_ADAPINFO_TH_L2H_INI, adapter->registrypriv.adaptivity_th_l2h_ini);
 	phydm_adaptivity_info_init(pDM_Odm, PHYDM_ADAPINFO_TH_EDCCA_HL_DIFF, adapter->registrypriv.adaptivity_th_edcca_hl_diff);
-	rtw_odm_adaptivity_update(dvobj);
 
 	/*halrf info init*/
 	halrf_cmn_info_init(pDM_Odm, HALRF_CMNINFO_EEPROM_THERMAL_VALUE, pHalData->eeprom_thermal_meter);
@@ -969,6 +969,11 @@ void SetHalODMVar(
 		break;
 	case HAL_ODM_WIFI_DISPLAY_STATE:
 		odm_cmn_info_update(podmpriv, ODM_CMNINFO_WIFI_DISPLAY, bSet);
+		break;
+	case HAL_ODM_REGULATION:
+		/* used to auto enable/disable adaptivity by SD7 */
+		phydm_adaptivity_info_update(podmpriv, PHYDM_ADAPINFO_DOMAIN_CODE_2G, 0);
+		phydm_adaptivity_info_update(podmpriv, PHYDM_ADAPINFO_DOMAIN_CODE_5G, 0);
 		break;
 	case HAL_ODM_INITIAL_GAIN: {
 		u8 rx_gain = *((u8 *)(pValue1));

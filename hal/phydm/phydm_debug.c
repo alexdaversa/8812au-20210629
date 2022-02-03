@@ -1003,13 +1003,12 @@ void phydm_dm_summary_cli_win(void *dm_void, char *buf, u8 macid)
 		return;
 	}
 
-	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE, "00.(%s) %-12s: IGI=0x%x, Dyn_Rng=0x%x~0x%x, fa_src=%d, FA_th={%d,%d,%d}\n",
+	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE, "00.(%s) %-12s: IGI=0x%x, Dyn_Rng=0x%x~0x%x, FA_th={%d,%d,%d}\n",
 		   ((comp & ODM_BB_DIG) ?
 		   ((pause_comp & ODM_BB_DIG) ? "P" : "V") : "."),
 		   "DIG",
 		   dig_t->cur_ig_value,
 		   dig_t->rx_gain_range_min, dig_t->rx_gain_range_max,
-		   dig_t->fa_source,
 		   dig_t->fa_th[0], dig_t->fa_th[1], dig_t->fa_th[2]);
         RT_PRINT(buf);
 
@@ -1481,24 +1480,12 @@ void phydm_basic_dbg_msg_cli_win(void *dm_void, char *buf)
 		RT_PRINT(buf);
 	}
 
-	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE, 
-		   "\r\n [Tx cnt] {CCK_TxEN, CCK_TxON, OFDM_TxEN, OFDM_TxON} = {%d, %d, %d, %d}",
-		   fa_t->cnt_cck_txen, fa_t->cnt_cck_txon, fa_t->cnt_ofdm_txen,
-		   fa_t->cnt_ofdm_txon);
-	RT_PRINT(buf);
-
 	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE, "\r\n [CCA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}",
 		   fa_t->cnt_cck_cca, fa_t->cnt_ofdm_cca, fa_t->cnt_cca_all);
 	RT_PRINT(buf);
 
 	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE, "\r\n [FA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}",
 		   fa_t->cnt_cck_fail, fa_t->cnt_ofdm_fail, fa_t->cnt_all);
-	RT_PRINT(buf);
-
-	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE,
-		   "\r\n [FA duration(us)] {exp, ifs_clm, fahm} = {%d, %d, %d}",
-		   fa_t->time_fa_exp, fa_t->time_fa_ifs_clm,
-		   fa_t->time_fa_fahm);
 	RT_PRINT(buf);
 
 	RT_SPRINTF(buf, DBGM_CLI_BUF_SIZE,
@@ -2624,18 +2611,10 @@ void phydm_basic_dbg_message(void *dm_void)
 	else
 		PHYDM_DBG(dm, DBG_CMN, "No Link !!!\n");
 
-	PHYDM_DBG(dm, DBG_CMN,
-		  "[Tx cnt] {CCK_TxEN, CCK_TxON, OFDM_TxEN, OFDM_TxON} = {%d, %d, %d, %d}\n",
-		  fa_t->cnt_cck_txen, fa_t->cnt_cck_txon, fa_t->cnt_ofdm_txen,
-		  fa_t->cnt_ofdm_txon);
 	PHYDM_DBG(dm, DBG_CMN, "[CCA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}\n",
 		  fa_t->cnt_cck_cca, fa_t->cnt_ofdm_cca, fa_t->cnt_cca_all);
 	PHYDM_DBG(dm, DBG_CMN, "[FA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}\n",
 		  fa_t->cnt_cck_fail, fa_t->cnt_ofdm_fail, fa_t->cnt_all);
-	PHYDM_DBG(dm, DBG_CMN,
-		  "[FA duration(us)] {exp, ifs_clm, fahm} = {%d, %d, %d}\n",
-		  fa_t->time_fa_exp, fa_t->time_fa_ifs_clm,
-		  fa_t->time_fa_fahm);
 	PHYDM_DBG(dm, DBG_CMN,
 		  "[OFDM FA] Parity=%d, Rate=%d, Fast_Fsync=%d, SBD=%d\n",
 		  fa_t->cnt_parity_fail, fa_t->cnt_rate_illegal,

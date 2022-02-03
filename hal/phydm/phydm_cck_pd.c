@@ -539,17 +539,6 @@ void phydm_cckpd_type3(void *dm_void)
 			else
 				is_update = false;
 		}
-        if (igi >= 0x20 && dm->rssi_min >= 27) {
-			//printf(">>>>>TUYA CCK FA CNT = %d, RSSI = %d, IGI =%d \n", cckpd_t->cck_fa_ma, dm->rssi_min, igi);
-			is_update = false;
-			odm_set_bb_reg(dm, R_0xa08, BIT(21) | BIT(20), 0x2);
-			//odm_set_bb_reg(dm, R_0xac8, 0xff, 0x18);
-		}
-		else {
-			//printf("CCK FA CNT = %d, RSSI = %d, IGI =%d \n", cckpd_t->cck_fa_ma, dm->rssi_min, igi);
-			odm_set_bb_reg(dm, R_0xa08, BIT(21) | BIT(20), cckpd_t->cck_din_shift_opt);
-			//odm_set_bb_reg(dm, R_0xac8, 0xff, cckpd_t->cck_pd_20m_1r);
-		}
 	} else {
 		if (cckpd_t->cck_fa_ma > 1000)
 			lv = CCK_PD_LV_1;
@@ -596,7 +585,6 @@ void phydm_cck_pd_init_type3(void *dm_void)
 	cckpd_t->cck_pd_20m_2r = (u8)odm_get_bb_reg(dm, R_0xac8, 0xff00);
 	cckpd_t->cck_pd_40m_1r = (u8)odm_get_bb_reg(dm, R_0xacc, 0xff);
 	cckpd_t->cck_pd_40m_2r = (u8)odm_get_bb_reg(dm, R_0xacc, 0xff00);
-    cckpd_t->cck_din_shift_opt = (u8)odm_get_bb_reg(dm, R_0xa08, BIT(21) | BIT(20));
 
 	reg_tmp = odm_get_bb_reg(dm, R_0xad0, MASKDWORD);
 	cckpd_t->cck_cs_ratio_20m_1r = (u8)(reg_tmp & 0x1f);

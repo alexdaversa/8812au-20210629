@@ -264,6 +264,7 @@ typedef enum _HAL_ODM_VARIABLE {
 	HAL_ODM_STA_INFO,
 	HAL_ODM_P2P_STATE,
 	HAL_ODM_WIFI_DISPLAY_STATE,
+	HAL_ODM_REGULATION,
 	HAL_ODM_INITIAL_GAIN,
 	HAL_ODM_RX_INFO_DUMP,
 	HAL_ODM_RX_Dframe_INFO,
@@ -460,7 +461,6 @@ struct hal_ops {
 #ifdef CONFIG_PCI_TX_POLLING
 	void (*tx_poll_handler)(_adapter *adapter);
 #endif
-	void (*hci_flush)(_adapter *adapter, u32 queue);
 };
 
 typedef	enum _RT_EEPROM_TYPE {

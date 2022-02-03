@@ -1977,9 +1977,8 @@ inline u8 rtw_sync_os_regd_cmd(_adapter *adapter, int flags, const char *country
 	*/
 
 	ent->chplan = rtk_ent ? rtk_ent->chplan : RTW_CHPLAN_UNSPECIFIED;
-	ent->txpwr_lmt_override = rtk_ent ? rtk_ent->txpwr_lmt_override : TXPWR_LMT_DEF;
-	#if defined(CONFIG_80211AC_VHT) || defined(CONFIG_80211AX_HE)
-	ent->proto_en = CCHPLAN_PROTO_EN_ALL;
+	#ifdef CONFIG_80211AC_VHT
+	ent->en_11ac = 1;
 	#endif
 
 	/* TODO: dfs_region */
@@ -5678,34 +5677,3 @@ u8 set_txq_params_cmd(_adapter *adapter, u32 ac_parm, u8 ac_type)
 exit:
 	return res;
 }
-
-/* Driver writes beacon length to REG for FW adjusting beacon receive time */
-#ifdef CONFIG_WRITE_BCN_LEN_TO_FW
-u8 rtw_write_bcnlen_to_fw_cmd(_adapter *padapter, u16 bcn_len)
-{
-	struct cmd_obj *pcmd;
-	struct write_bcnlen_param *parm;
-	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
-	u8 res = _SUCCESS;
-
-	pcmd = (struct cmd_obj *)rtw_zmalloc(sizeof(struct cmd_obj));
-	if (pcmd == NULL) {
-		res = _FAIL;
-		goto exit;
-	}
-
-	parm = (struct write_bcnlen_param *)rtw_zmalloc(sizeof(struct write_bcnlen_param));
-	if (parm == NULL) {
-		rtw_mfree((unsigned char *)pcmd, sizeof(struct cmd_obj));
-		res = _FAIL;
-		goto exit;
-	}
-
-	parm->bcn_len = bcn_len;
-	init_h2fwcmd_w_parm_no_rsp(pcmd, parm, CMD_WRITE_BCN_LEN);
-	res = rtw_enqueue_cmd(pcmdpriv, pcmd);
-
-exit:
-	return res;
-}
-#endif /* CONFIG_WRITE_BCN_LEN_TO_FW */

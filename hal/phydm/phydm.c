@@ -1723,10 +1723,7 @@ void phydm_supportability_init(void *dm_void)
 		if(IS_FUNC_EN(&dm->en_tssi_mode) &&
 		    (dm->support_ic_type & ODM_RTL8822C))
 			support_ability &= ~ODM_BB_DYNAMIC_TXPWR;
-		/*@[DYNAMIC_TXPWR and TSSI cannot coexist]*/
-		if(IS_FUNC_EN(&dm->en_tssi_mode) &&
-		    (dm->support_ic_type & ODM_RTL8723F))
-			support_ability &= ~ODM_BB_DYNAMIC_TXPWR;
+
 	}
 	dm->support_ability = support_ability;
 	PHYDM_DBG(dm, ODM_COMP_INIT, "IC=0x%x, mp=%d, Supportability=0x%llx\n",
@@ -1812,6 +1809,7 @@ enum phydm_init_result odm_dm_init(struct dm_struct *dm)
 	phydm_cck_pd_init(dm);
 #endif
 	phydm_env_monitor_init(dm);
+	phydm_enhance_monitor_init(dm);
 	phydm_adaptivity_init(dm);
 	phydm_ra_info_init(dm);
 	phydm_rssi_monitor_init(dm);
@@ -2400,8 +2398,6 @@ void phydm_watchdog(struct dm_struct *dm)
 
 	phydm_hw_setting(dm);
 
-	phydm_env_mntr_result_watchdog(dm);
-
 #ifdef PHYDM_TDMA_DIG_SUPPORT
 	if (dm->original_dig_restore == 0) {
 		phydm_tdma_dig_timer_check(dm);
@@ -2462,7 +2458,8 @@ void phydm_watchdog(struct dm_struct *dm)
 	odm_dtc(dm);
 #endif
 
-	phydm_env_mntr_set_watchdog(dm);
+	phydm_env_mntr_watchdog(dm);
+	phydm_enhance_mntr_watchdog(dm);
 
 #ifdef PHYDM_LNA_SAT_CHK_SUPPORT
 	phydm_lna_sat_chk_watchdog(dm);
@@ -3092,10 +3089,7 @@ u32 phydm_cmn_info_query(struct dm_struct *dm, enum phydm_info_query info_type)
 		return (u32)ccx_info->nhm_pwr;
 	case PHYDM_INFO_NHM_ENV_RATIO:
 		return (u32)ccx_info->nhm_env_ratio;
-	case PHYDM_INFO_TXEN_CCK:
-		return (u32)fa_t->cnt_cck_txen;
-	case PHYDM_INFO_TXEN_OFDM:
-		return (u32)fa_t->cnt_ofdm_txen;
+
 	default:
 		return 0xffffffff;
 	}

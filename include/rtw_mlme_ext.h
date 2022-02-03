@@ -340,10 +340,6 @@ struct mlme_ext_info {
 	NDIS_802_11_RATES_EX	SupportedRates_infra_ap;
 	u8 ht_vht_received;/*ht_vht_received used to show debug msg BIT(0):HT BIT(1):VHT */
 #endif /* ROKU_PRIVATE */
-
-#ifdef CONFIG_WRITE_BCN_LEN_TO_FW
-	u16 last_bcn_len;
-#endif
 };
 
 enum {
@@ -433,11 +429,7 @@ struct get_chplan_resp {
 	struct country_chplan country_ent;
 	u8 channel_plan;
 #if CONFIG_TXPWR_LIMIT
-	const char *txpwr_lmt_name;
-#endif
-	u8 edcca_mode_2g;
-#if CONFIG_IEEE80211_BAND_5GHZ
-	u8 edcca_mode_5g;
+	const char *regd_name;
 #endif
 #ifdef CONFIG_DFS_MASTER
 	u8 dfs_domain;
@@ -525,11 +517,6 @@ struct mlme_ext_priv {
 #endif
 
 	struct ss_res		sitesurvey_res;
-#ifdef CONFIG_RTW_ROAM_QUICKSCAN
-	u8      quickscan_next;
-	u8      roam_ch_num;
-	struct  rtw_ieee80211_channel roam_ch[RTW_CHANNEL_SCAN_AMOUNT];
-#endif
 	struct mlme_ext_info	mlmext_info;/* for sta/adhoc mode, including current scanning/connecting/connected related info.
                                                       * for ap mode, network includes ap's cap_info */
 	_timer		survey_timer;
@@ -1160,7 +1147,6 @@ u8 led_blink_hdl(_adapter *padapter, unsigned char *pbuf);
 u8 set_csa_hdl(_adapter *padapter, unsigned char *pbuf);	/* Kurt: Handling DFS channel switch announcement ie. */
 u8 tdls_hdl(_adapter *padapter, unsigned char *pbuf);
 u8 run_in_thread_hdl(_adapter *padapter, u8 *pbuf);
-u8 rtw_write_bcnlen_hdl(_adapter *padapter, u8 *pbuf);
 
 int rtw_sae_preprocess(_adapter *adapter, const u8 *buf, u32 len, u8 tx);
 
@@ -1210,7 +1196,6 @@ struct rtw_cmd wlancmds[] = {
 	GEN_MLME_EXT_HANDLER(rtw_mesh_set_plink_state_cmd_hdl, NULL) /*CMD_SET_MESH_PLINK_STATE*/
 	GEN_MLME_EXT_HANDLER(rtw_iqk_hdl, NULL) /*CMD_DO_IQK*/
 	GEN_MLME_EXT_HANDLER(rtw_get_chplan_hdl, NULL) /* CMD_GET_CHANPLAN */
-	GEN_MLME_EXT_HANDLER(rtw_write_bcnlen_hdl, NULL) /* CMD_WRITE_BCN_LEN */
 };
 #endif
 

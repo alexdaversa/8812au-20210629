@@ -243,7 +243,6 @@ _PHYDM_FILES += hal/phydm/$(RTL871X)/halhwimg8723f_bb.o\
 								hal/phydm/halrf/$(RTL871X)/halrf_iqk_8723f.o\
 								hal/phydm/halrf/$(RTL871X)/halrf_tssi_8723f.o\
 								hal/phydm/halrf/$(RTL871X)/halrf_dpk_8723f.o\
-								hal/phydm/halrf/$(RTL871X)/halrf_txgapk_8723f.o\
 								hal/phydm/halrf/$(RTL871X)/halrf_rfk_init_8723f.o\
 								hal/phydm/halrf/$(RTL871X)/halhwimg8723f_rf.o
 endif

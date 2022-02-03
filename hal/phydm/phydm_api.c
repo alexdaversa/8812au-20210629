@@ -1243,12 +1243,22 @@ boolean phydm_spur_case_mapping(void *dm_void)
 	u8 channel = *dm->channel, bw = *dm->band_width;
 	boolean mapping_result = false;
 #if (RTL8814B_SUPPORT == 1)
-	if (channel == 153 && bw == CHANNEL_WIDTH_20)
+	if (channel == 153 && bw == CHANNEL_WIDTH_20) {
+		odm_set_bb_reg(dm, R_0x804, BIT(31), 0);
+		odm_set_bb_reg(dm, R_0xc00, BIT(25) | BIT(24), 0);
 		mapping_result =  true;
-	else if (channel == 151 && bw == CHANNEL_WIDTH_40)
+	} else if (channel == 151 && bw == CHANNEL_WIDTH_40) {
+		odm_set_bb_reg(dm, R_0x804, BIT(31), 0);
+		odm_set_bb_reg(dm, R_0xc00, BIT(25) | BIT(24), 0);
 		mapping_result =  true;
-	else if (channel == 155 && bw == CHANNEL_WIDTH_80)
+	} else if (channel == 155 && bw == CHANNEL_WIDTH_80) {
+		odm_set_bb_reg(dm, R_0x804, BIT(31), 0);
+		odm_set_bb_reg(dm, R_0xc00, BIT(25) | BIT(24), 0);
 		mapping_result =  true;
+	} else {
+		odm_set_bb_reg(dm, R_0x804, BIT(31), 1);
+		odm_set_bb_reg(dm, R_0xc00, BIT(25) | BIT(24), 1);
+	}
 #endif
 	return mapping_result;
 }
@@ -2393,7 +2403,6 @@ phydm_api_shift_txagc(void *dm_void, u32 pwr_offset, enum rf_path path,
 	u32 txagc_ofdm = 0;
 	u32 r_txagc_ofdm[4] = {R_0x18e8, R_0x41e8, R_0x52e8, R_0x53e8};
 	u32 r_txagc_cck[4] = {R_0x18a0, R_0x41a0, R_0x52a0, R_0x53a0};
-	u32 r_new_txagc[1] = {R_0x4308};
 
 	#if (RTL8822C_SUPPORT || RTL8812F_SUPPORT || RTL8197G_SUPPORT)
 	if (dm->support_ic_type &
@@ -2495,10 +2504,10 @@ phydm_api_shift_txagc(void *dm_void, u32 pwr_offset, enum rf_path path,
 				  path);
 			return false;
 		}
-		txagc_cck = (u8)odm_get_bb_reg(dm, r_new_txagc[path],
-					       0x0000007f);
-		txagc_ofdm = (u8)odm_get_bb_reg(dm, r_new_txagc[path],
-						0x00007f00);
+		txagc_cck = (u8)odm_get_bb_reg(dm, r_txagc_cck[path],
+						   0x7F0000);
+		txagc_ofdm = (u8)odm_get_bb_reg(dm, r_txagc_ofdm[path],
+						    0x1FC00);
 		if (is_positive) {
 			if (((txagc_cck + pwr_offset) > 127) ||
 			    ((txagc_ofdm + pwr_offset) > 127))
